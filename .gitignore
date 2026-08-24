@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# Secrets — never commit these. Every one has a committed .example twin.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Uploaded client media. Real customer data; never belongs in the repo.
+uploads/
+
+# Local scratch from testing
+.t/
+.t2/
+.t3/
+.t4/
+.p/
+.o/
+.s/
+.s2/
+.c/
+.c2/
+.e/
+.m/
+.w/
+.tmp-test/
+
+# Logs & coverage
+*.log
+npm-debug.log*
+coverage/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

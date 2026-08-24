@@ -1,0 +1,79 @@
+# Production-shaped stack. Read DEPLOYMENT.md before using this — it is a
+# working starting point, not a hardened deployment. In particular it does not
+# terminate TLS; put a reverse proxy (Caddy, nginx, or your cloud's load
+# balancer) in front, because Meta will only call HTTPS webhooks and the app
+# ships session tokens on every request.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-custodian}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-custodian_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set POSTGRES_ADMIN_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER:-custodian_admin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Not published to the host: only the API needs to reach it.
+    expose:
+      - "5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+
+  api:
+    build:
+      context: ./api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Runs as the NON-superuser app role so Row-Level Security applies.
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL for the custodian_app role}
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?set APP_ENCRYPTION_KEY}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:?set PUBLIC_API_URL, e.g. https://api.example.com}
+      ENABLE_RLS: ${ENABLE_RLS:-false}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-mock}
+      TURN_URL: ${TURN_URL:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+    volumes:
+      # Local-disk attachment storage. Swap for S3 before you care about
+      # surviving a host failure — see DEPLOYMENT.md.
+      - uploads:/app/uploads
+    expose:
+      - "3000"
+
+  admin:
+    build:
+      context: ./admin
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:?set NEXT_PUBLIC_API_BASE, e.g. https://api.example.com/api}
+    restart: unless-stopped
+    depends_on:
+      - api
+    expose:
+      - "3000"
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:

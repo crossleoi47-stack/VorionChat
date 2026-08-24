@@ -1,0 +1,545 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Tenancy ──────────────────────────────────────────────────────────────
+
+model Company {
+  id        String   @id @default(uuid())
+  code      String   @unique // e.g. "ABC" — what employees type at login
+  name      String
+  status    CompanyStatus @default(ACTIVE)
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users             User[]
+  clients           Client[]
+  departments       Department[]
+  groups            ConversationGroup[]
+  conversations     Conversation[]
+  whatsappAccounts  WhatsappAccount[]
+  auditLogs         AuditLog[]
+  messageTemplates  MessageTemplate[]
+  statuses          Status[]
+  calls             Call[]
+
+  @@map("companies")
+}
+
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+// ── Identity & RBAC ──────────────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+  MANAGER
+  EMPLOYEE
+  AUDITOR
+}
+
+model User {
+  id            String    @id @default(uuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id])
+  employeeCode  String    // e.g. "EMP-1024" — unique within a company, shown in the UI
+  /// Login identity. Globally unique, which is what lets people sign in with
+  /// just email + password: the company is derived from the account rather
+  /// than typed in. Optional only so pre-existing rows migrate cleanly — it
+  /// is required for every new user.
+  email         String?   @unique
+  fullName      String
+  role          Role
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id])
+  passwordHash  String
+  mustResetPassword Boolean @default(true)
+  totpSecret    String?   // set once TOTP step-up is enrolled (required for admin roles)
+  lastSeenAt    DateTime?
+  /// Sparse per-person overrides of the role's feature defaults, e.g.
+  /// {"sendMedia": false}. Absent keys fall through to company/role policy.
+  /// Resolved server-side by FeaturesService — never trusted from a client.
+  featureOverrides Json?
+  /// Personal privacy toggle, mirroring WhatsApp's "last seen" setting.
+  /// Admins can force it off company-wide via Company.settings.
+  showLastSeen  Boolean   @default(true)
+  status        UserStatus @default(ACTIVE)
+  disabledAt    DateTime?
+  disabledBy    String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions          Session[]
+  assignmentsOwned  ClientAssignment[] @relation("AssignedTo")
+  assignmentsMade   ClientAssignment[] @relation("AssignedBy")
+  messages          Message[]
+  auditLogsAsActor  AuditLog[]
+  groupMemberships  GroupMember[]
+  statuses          Status[]
+  statusViews       StatusView[]
+  callsMade         Call[]       @relation("CallsMade")
+  callsReceived     Call[]       @relation("CallsReceived")
+
+  @@unique([companyId, employeeCode])
+  @@index([companyId, status])
+  @@map("users")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+model Session {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id])
+  refreshTokenHash  String
+  deviceLabel       String?
+  userAgent         String?
+  ip                String?
+  lastSeenAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
+  revokedAt         DateTime?
+
+  @@index([userId, revokedAt])
+  @@map("sessions")
+}
+
+// ── Departments & groups ────────────────────────────────────────────────
+
+model Department {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  createdAt DateTime @default(now())
+
+  users User[]
+
+  @@unique([companyId, name])
+  @@map("departments")
+}
+
+model ConversationGroup {
+  id            String   @id @default(uuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id])
+  name          String
+  description   String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  members       GroupMember[]
+  conversation  Conversation?
+
+  @@unique([companyId, name])
+  @@map("conversation_groups")
+}
+
+enum GroupMemberType {
+  USER
+  CLIENT
+}
+
+model GroupMember {
+  id        String          @id @default(uuid())
+  groupId   String
+  group     ConversationGroup @relation(fields: [groupId], references: [id])
+  memberType GroupMemberType
+  userId    String?
+  user      User?           @relation(fields: [userId], references: [id])
+  clientId  String?
+  client    Client?         @relation(fields: [clientId], references: [id])
+  isAdmin   Boolean         @default(false)
+  addedAt   DateTime        @default(now())
+
+  @@unique([groupId, memberType, userId, clientId])
+  @@map("group_members")
+}
+
+// ── Clients & assignment ────────────────────────────────────────────────
+
+model Client {
+  id           String   @id @default(uuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
+  displayCode  String   // e.g. "CL-12345", shown to employees instead of any contact detail
+  name         String
+  org          String?
+  phoneE164    String   // NEVER serialized to an employee-facing response — see clients.projector.ts
+  email        String?
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignments   ClientAssignment[]
+  groupMemberships GroupMember[]
+  conversations Conversation[]
+
+  @@unique([companyId, phoneE164])
+  @@unique([companyId, displayCode])
+  @@index([companyId])
+  @@map("clients")
+}
+
+model ClientAssignment {
+  id           String    @id @default(uuid())
+  clientId     String
+  client       Client    @relation(fields: [clientId], references: [id])
+  userId       String
+  user         User      @relation("AssignedTo", fields: [userId], references: [id])
+  assignedById String
+  assignedBy   User      @relation("AssignedBy", fields: [assignedById], references: [id])
+  assignedAt   DateTime  @default(now())
+  unassignedAt DateTime?
+
+  @@index([clientId, unassignedAt])
+  @@index([userId, unassignedAt])
+  @@map("client_assignments")
+}
+
+// ── Conversations & messages ────────────────────────────────────────────
+
+enum ConversationType {
+  DIRECT
+  GROUP
+  WHATSAPP
+}
+
+model Conversation {
+  id                String   @id @default(uuid())
+  companyId         String
+  company           Company  @relation(fields: [companyId], references: [id])
+  type              ConversationType
+  groupId           String?  @unique
+  group             ConversationGroup? @relation(fields: [groupId], references: [id])
+  clientId          String?
+  client            Client?  @relation(fields: [clientId], references: [id])
+  whatsappAccountId String?
+  whatsappAccount   WhatsappAccount? @relation(fields: [whatsappAccountId], references: [id])
+  createdAt         DateTime @default(now())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+  states       ConversationState[]
+
+  @@index([companyId])
+  @@index([companyId, clientId])
+  @@map("conversations")
+}
+
+enum ParticipantType {
+  USER
+  CLIENT
+}
+
+model ConversationParticipant {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  participantType ParticipantType
+  userId         String?
+  clientId       String?
+  joinedAt       DateTime     @default(now())
+  leftAt         DateTime?
+
+  @@unique([conversationId, participantType, userId, clientId])
+  @@map("conversation_participants")
+}
+
+enum MessageChannel {
+  INTERNAL
+  WHATSAPP
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  VOICE
+  TEMPLATE
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  senderUserId   String?
+  senderUser     User?        @relation(fields: [senderUserId], references: [id])
+  senderIsClient Boolean      @default(false)
+  channel        MessageChannel
+  type           MessageType  @default(TEXT)
+  body           String?
+  waMessageId    String?      @unique
+  replyToId      String?
+  replyTo        Message?     @relation("MessageReply", fields: [replyToId], references: [id])
+  replies        Message[]    @relation("MessageReply")
+  forwarded      Boolean      @default(false)
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  deletedForAll  Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  attachments Attachment[]
+  statuses    MessageStatus[]
+  reactions   MessageReaction[]
+  stars       MessageStar[]
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String?
+  clientId  String?
+  emoji     String
+  createdAt DateTime @default(now())
+
+  // One reaction per person per message — reacting again replaces it, which
+  // is how WhatsApp behaves.
+  @@unique([messageId, userId, clientId])
+  @@index([messageId])
+  @@map("message_reactions")
+}
+
+model MessageStar {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([userId])
+  @@map("message_stars")
+}
+
+/// Per-user, per-conversation UI state: archive/pin/mute/unread are personal,
+/// not properties of the conversation itself (my pinning a chat must not pin
+/// it for a colleague who shares the same client).
+model ConversationState {
+  id             String    @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  archivedAt     DateTime?
+  pinnedAt       DateTime?
+  mutedUntil     DateTime?
+  lastReadAt     DateTime?
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_states")
+}
+
+model Attachment {
+  id           String  @id @default(uuid())
+  messageId    String
+  message      Message @relation(fields: [messageId], references: [id])
+  storageKey   String
+  mimeType     String
+  sizeBytes    Int
+  checksum     String
+  originalName String?
+
+  @@map("attachments")
+}
+
+enum StatusParticipantType {
+  USER
+  CLIENT
+}
+
+model MessageStatus {
+  id              String   @id @default(uuid())
+  messageId       String
+  message         Message  @relation(fields: [messageId], references: [id])
+  participantType StatusParticipantType
+  participantId   String
+  deliveredAt     DateTime?
+  readAt          DateTime?
+
+  @@unique([messageId, participantType, participantId])
+  @@map("message_status")
+}
+
+// ── WhatsApp integration ────────────────────────────────────────────────
+
+enum WhatsappAccountStatus {
+  UNVERIFIED
+  CONNECTED
+  ERROR
+}
+
+model WhatsappAccount {
+  id             String   @id @default(uuid())
+  companyId      String
+  company        Company  @relation(fields: [companyId], references: [id])
+  wabaId         String
+  phoneNumberId  String   @unique // Meta's phone_number_id — routes inbound webhooks to a tenant
+  displayNumber  String
+  label          String?
+  departmentId   String?
+  /// Legacy path: name of an env var / KMS entry holding the token.
+  accessTokenRef String?
+  /// Preferred path: the token itself, AES-256-GCM encrypted with
+  /// APP_ENCRYPTION_KEY, so an admin can paste it into the UI without anyone
+  /// touching a server config file. Never returned to a client.
+  accessTokenEnc String?
+  appSecretEnc   String?
+  verifyTokenEnc String?
+  status         WhatsappAccountStatus @default(UNVERIFIED)
+  lastCheckedAt  DateTime?
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  conversations Conversation[]
+
+  @@index([companyId])
+  @@map("whatsapp_accounts")
+}
+
+enum TemplateStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model MessageTemplate {
+  id           String         @id @default(uuid())
+  companyId    String
+  company      Company        @relation(fields: [companyId], references: [id])
+  name         String
+  waTemplateName String
+  status       TemplateStatus @default(PENDING)
+  variables    Json           @default("[]")
+  createdAt    DateTime       @default(now())
+
+  @@unique([companyId, name])
+  @@map("message_templates")
+}
+
+// ── Status / Stories ─────────────────────────────────────────────────────
+// Staff-only: Meta exposes no status API to businesses, so a WhatsApp client
+// can never see these. Entirely ours, hence full WhatsApp parity here.
+
+enum StatusType {
+  TEXT
+  IMAGE
+  VIDEO
+}
+
+model Status {
+  id              String     @id @default(uuid())
+  companyId       String
+  company         Company    @relation(fields: [companyId], references: [id])
+  authorId        String
+  author          User       @relation(fields: [authorId], references: [id])
+  type            StatusType @default(TEXT)
+  /// Text body for TEXT statuses, caption for media.
+  body            String?
+  /// Hex fill for TEXT statuses so they render like WhatsApp's coloured cards.
+  backgroundColor String?
+  storageKey      String?
+  mimeType        String?
+  sizeBytes       Int?
+  createdAt       DateTime   @default(now())
+  /// Set to createdAt + 24h on create; reads filter on this rather than
+  /// relying on a cleanup job, so expiry is correct even if the job lags.
+  expiresAt       DateTime
+  deletedAt       DateTime?
+
+  views StatusView[]
+
+  @@index([companyId, expiresAt])
+  @@index([authorId, expiresAt])
+  @@map("statuses")
+}
+
+model StatusView {
+  id       String   @id @default(uuid())
+  statusId String
+  status   Status   @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  viewerId String
+  viewer   User     @relation(fields: [viewerId], references: [id])
+  viewedAt DateTime @default(now())
+
+  @@unique([statusId, viewerId])
+  @@index([statusId])
+  @@map("status_views")
+}
+
+// ── Calling ──────────────────────────────────────────────────────────────
+// Staff-to-staff WebRTC. Media is peer-to-peer and never touches our servers
+// — we only relay signalling (SDP/ICE) over the existing socket gateway.
+// Meta offers businesses no video calling to WhatsApp clients, so this is
+// internal-only, same as groups and status.
+
+enum CallType {
+  VOICE
+  VIDEO
+}
+
+enum CallStatus {
+  RINGING
+  ONGOING
+  ENDED
+  MISSED
+  DECLINED
+  FAILED
+}
+
+model Call {
+  id             String     @id @default(uuid())
+  companyId      String
+  company        Company    @relation(fields: [companyId], references: [id])
+  conversationId String?
+  callerId       String
+  caller         User       @relation("CallsMade", fields: [callerId], references: [id])
+  calleeId       String
+  callee         User       @relation("CallsReceived", fields: [calleeId], references: [id])
+  type           CallType   @default(VOICE)
+  status         CallStatus @default(RINGING)
+  startedAt      DateTime   @default(now())
+  answeredAt     DateTime?
+  endedAt        DateTime?
+
+  @@index([companyId, startedAt])
+  @@index([callerId, startedAt])
+  @@index([calleeId, startedAt])
+  @@map("calls")
+}
+
+// ── Audit ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String   // e.g. "client.phone.read", "user.disable", "client.reassign"
+  target    String   // e.g. "client:CL-12345"
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, action])
+  @@map("audit_log")
+}

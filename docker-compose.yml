@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      # Bootstrap user — a Postgres superuser, used only for running
+      # migrations. The API itself connects as `custodian_app`, a separate
+      # non-superuser role created by db/init-db.sql — see that file and
+      # api/prisma/rls.sql for why the split matters.
+      POSTGRES_DB: custodian
+      POSTGRES_USER: custodian_admin
+      POSTGRES_PASSWORD: custodian_admin_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - custodian_postgres_data:/var/lib/postgresql/data
+      - ./db/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  custodian_postgres_data:
