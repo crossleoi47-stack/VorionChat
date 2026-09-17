@@ -1,10 +1,10 @@
-import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from "class-validator";
-import { Role } from "@prisma/client";
+import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
 
 export class CreateUserDto {
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  employeeCode!: string;
+  employeeCode?: string;
 
   /** Their sign-in identity — required for anyone created from now on. */
   @IsEmail({}, { message: "Enter a valid email address" })
@@ -14,10 +14,18 @@ export class CreateUserDto {
   @MinLength(1)
   fullName!: string;
 
-  @IsEnum(Role)
-  role!: Role;
+  @IsString()
+  role!: string;
 
   @IsOptional()
   @IsString()
   departmentId?: string;
+
+  @IsString()
+  @MinLength(8)
+  password!: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 }

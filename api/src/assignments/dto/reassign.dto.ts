@@ -1,4 +1,4 @@
-import { IsString } from "class-validator";
+import { IsOptional, IsString, MinLength } from "class-validator";
 
 export class ReassignDto {
   @IsString()
@@ -6,4 +6,9 @@ export class ReassignDto {
 
   @IsString()
   newUserId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  reason?: string;
 }

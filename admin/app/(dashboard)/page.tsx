@@ -9,6 +9,9 @@ interface UserRow {
   id: string;
   status: string;
 }
+interface UserListResult {
+  items: UserRow[];
+}
 interface ClientRow {
   id: string;
 }
@@ -38,7 +41,13 @@ export default function DashboardPage() {
       api<ClientRow[]>("/clients").then(setClients),
       api<ConversationRow[]>("/conversations").then(setConversations),
     ];
-    if (canManageEmployees) requests.push(api<UserRow[]>("/users").then(setUsers));
+    if (canManageEmployees)
+      requests.push(
+        api<UserListResult | UserRow[]>("/users").then((result) => {
+          const rows = Array.isArray(result) ? result : result?.items ?? [];
+          setUsers(rows);
+        }),
+      );
     if (canSeeAudit) requests.push(api<AuditRow[]>("/audit-log?take=10").then(setRecent));
 
     // allSettled, not all — one endpoint 403ing for this role (or failing
@@ -46,8 +55,8 @@ export default function DashboardPage() {
     Promise.allSettled(requests).finally(() => setLoading(false));
   }, [user, canManageEmployees, canSeeAudit]);
 
-  const activeEmployees = users?.filter((u) => u.status === "ACTIVE").length ?? null;
-  const disabledEmployees = users?.filter((u) => u.status === "DISABLED").length ?? null;
+  const activeEmployees = Array.isArray(users) ? users.filter((u) => u.status === "ACTIVE").length : null;
+  const disabledEmployees = Array.isArray(users) ? users.filter((u) => u.status === "DISABLED").length : null;
 
   return (
     <>

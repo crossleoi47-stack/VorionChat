@@ -20,6 +20,10 @@ export default function ClientsPage() {
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [selected, setSelected] = useState<ClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [form, setForm] = useState({ displayCode: "", name: "", org: "", phoneE164: "", email: "" });
 
   useEffect(() => {
     api<ClientRow[]>("/clients")
@@ -33,11 +37,71 @@ export default function ClientsPage() {
     setSelected(detail);
   }
 
+  async function addClient(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    setSaving(true);
+    try {
+      const created = await api<ClientRow>("/clients", {
+        method: "POST",
+        body: {
+          displayCode: form.displayCode.trim(),
+          name: form.name.trim(),
+          org: form.org.trim() || undefined,
+          phoneE164: form.phoneE164.trim(),
+          email: form.email.trim() || undefined,
+        },
+      });
+      setClients((current) => [created, ...current]);
+      setForm({ displayCode: "", name: "", org: "", phoneE164: "", email: "" });
+      setShowAddForm(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not add client");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <>
       <div className="page-header">
         <h1>Clients</h1>
+        <button className="primary" onClick={() => { setFormError(null); setShowAddForm((open) => !open); }}>
+          {showAddForm ? "Cancel" : "Add client"}
+        </button>
       </div>
+
+      {showAddForm && (
+        <form className="card" onSubmit={addClient} style={{ marginBottom: 20, maxWidth: 760 }}>
+          <h3 style={{ marginTop: 0 }}>Add client</h3>
+          {formError && <div className="error-banner">{formError}</div>}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+            <div className="field">
+              <label htmlFor="client-id">Client ID</label>
+              <input id="client-id" required value={form.displayCode} onChange={(e) => setForm({ ...form, displayCode: e.target.value })} />
+            </div>
+            <div className="field">
+              <label htmlFor="client-name">Name</label>
+              <input id="client-name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </div>
+            <div className="field">
+              <label htmlFor="client-company">Company</label>
+              <input id="client-company" value={form.org} onChange={(e) => setForm({ ...form, org: e.target.value })} />
+            </div>
+            <div className="field">
+              <label htmlFor="client-phone">Phone</label>
+              <input id="client-phone" type="tel" required placeholder="+14155552671" value={form.phoneE164} onChange={(e) => setForm({ ...form, phoneE164: e.target.value })} />
+            </div>
+            <div className="field">
+              <label htmlFor="client-email">Email</label>
+              <input id="client-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </div>
+          </div>
+          <button className="primary" type="submit" disabled={saving}>
+            {saving ? "Saving..." : "Save client"}
+          </button>
+        </form>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: selected ? "1fr 320px" : "1fr", gap: 20 }}>
         <div className="card">

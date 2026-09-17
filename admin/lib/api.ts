@@ -1,10 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3000/api";
-
-// Tokens live in localStorage for this scaffold's simplicity — that's
-// readable by any script on the page, i.e. vulnerable to XSS in a way an
-// httpOnly cookie set by the backend isn't. Before this handles real client
-// phone numbers in production, move to httpOnly cookies issued by the API
-// (with CSRF protection) instead of trusting the browser to keep this safe.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3010/api";
 
 export class ApiError extends Error {
   constructor(

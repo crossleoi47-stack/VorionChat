@@ -46,6 +46,13 @@ export const IconTeam = ({ size = 22, className }: P) => (
   </svg>
 );
 
+export const IconUser = ({ size = 22, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <circle cx="12" cy="8.2" r="3.3" />
+    <path d="M5.2 19.2a6.8 6.8 0 0 1 13.6 0" />
+  </svg>
+);
+
 export const IconDashboard = ({ size = 22, className }: P) => (
   <svg {...base(size)} className={className}>
     <rect x="3.2" y="3.2" width="7.2" height="7.2" rx="1.6" />

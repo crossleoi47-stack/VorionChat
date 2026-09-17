@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuthenticatedUser } from "../auth/jwt-payload.interface";
 import { PolicyService } from "../policy/policy.service";
+import { SupabaseService } from "../supabase/supabase.service";
 
 export interface ConversationSummaryDto {
   id: string;
@@ -26,6 +27,7 @@ export class ConversationsService {
   constructor(
     private prisma: PrismaService,
     private policy: PolicyService,
+    private supabase: SupabaseService,
   ) {}
 
   private async visibilityFilter(user: AuthenticatedUser): Promise<Prisma.ConversationWhereInput> {
@@ -38,17 +40,10 @@ export class ConversationsService {
         companyId: user.companyId,
         OR: [
           { participants: { some: { participantType: "USER", userId: user.id } } },
-          {
-            client: {
-              assignments: {
-                some: { unassignedAt: null, user: { departmentId: manager?.departmentId ?? "__none__" } },
-              },
-            },
-          },
+          { client: { assignments: { some: { unassignedAt: null, user: { departmentId: manager?.departmentId ?? "__none__" } } } } },
         ],
       };
     }
-    // EMPLOYEE
     return {
       companyId: user.companyId,
       OR: [
@@ -59,69 +54,7 @@ export class ConversationsService {
   }
 
   async listForUser(user: AuthenticatedUser): Promise<ConversationSummaryDto[]> {
-    const where = await this.visibilityFilter(user);
-    const conversations = await this.prisma.conversation.findMany({
-      where,
-      include: {
-        client: true,
-        group: true,
-        messages: { orderBy: { createdAt: "desc" }, take: 1 },
-        states: { where: { userId: user.id } },
-        participants: { where: { participantType: "USER", leftAt: null } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    // For DIRECT chats, resolve the other participant's name in one query.
-    const peerIds = conversations
-      .filter((c) => c.type === "DIRECT")
-      .map((c) => c.participants.find((p) => p.userId !== user.id)?.userId)
-      .filter((id): id is string => !!id);
-    const peers = peerIds.length
-      ? await this.prisma.user.findMany({
-          where: { id: { in: peerIds } },
-          select: { id: true, fullName: true },
-        })
-      : [];
-    const peerName = new Map(peers.map((p) => [p.id, p.fullName]));
-
-    // Unread = messages from the other side newer than my lastReadAt. Counted
-    // per conversation rather than tracked incrementally so it survives
-    // reconnects and multiple devices.
-    const counts = await Promise.all(
-      conversations.map((c) => {
-        const lastRead = c.states[0]?.lastReadAt;
-        return this.prisma.message.count({
-          where: {
-            conversationId: c.id,
-            deletedAt: null,
-            senderUserId: { not: user.id },
-            ...(lastRead ? { createdAt: { gt: lastRead } } : {}),
-          },
-        });
-      }),
-    );
-
-    return conversations.map((c, i) => {
-      const st = c.states[0];
-      const peerId =
-        c.type === "DIRECT" ? (c.participants.find((p) => p.userId !== user.id)?.userId ?? null) : null;
-      return {
-        id: c.id,
-        type: c.type,
-        groupId: c.groupId,
-        peerUserId: peerId,
-        peerName: peerId ? (peerName.get(peerId) ?? null) : null,
-        clientDisplayCode: c.client?.displayCode ?? null,
-        clientName: c.client?.name ?? null,
-        groupName: c.group?.name ?? null,
-        lastMessageAt: c.messages[0]?.createdAt.toISOString() ?? null,
-        archived: !!st?.archivedAt,
-        pinned: !!st?.pinnedAt,
-        muted: !!st?.mutedUntil && st.mutedUntil > new Date(),
-        unreadCount: counts[i],
-      };
-    });
+    return (await this.supabase.listConversationsForUser(user)) as unknown as ConversationSummaryDto[];
   }
 
   async assertVisible(conversationId: string, user: AuthenticatedUser): Promise<void> {

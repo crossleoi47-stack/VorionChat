@@ -1,10 +1,10 @@
 import { Controller, Get } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
 import { Public } from "../auth/public.decorator";
+import { SupabaseService } from "../supabase/supabase.service";
 
 @Controller("health")
 export class HealthController {
-  constructor(private prisma: PrismaService) {}
+  constructor(private supabase: SupabaseService) {}
 
   /**
    * Liveness + a real database round-trip, so a container that can't reach
@@ -15,11 +15,13 @@ export class HealthController {
   @Public()
   @Get()
   async check() {
-    try {
-      await this.prisma.$queryRaw`SELECT 1`;
-      return { status: "ok" };
-    } catch {
-      return { status: "degraded", database: "unreachable" };
-    }
+    const state = this.supabase.getConnectionState();
+    return state.connected
+      ? { status: "ok", supabase: "connected" }
+      : {
+          status: "degraded",
+          supabase: "disconnected",
+          error: state.lastErrorMessage ?? "Supabase unavailable",
+        };
   }
 }

@@ -23,14 +23,25 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
   private readonly rlsEnabled: boolean;
+  private readonly canConnect: boolean;
 
   constructor() {
     super();
     this.rlsEnabled = process.env.ENABLE_RLS === "true";
+    this.canConnect = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL ?? "");
   }
 
   async onModuleInit() {
-    await this.$connect();
+    if (!this.canConnect) {
+      this.logger.warn("Prisma startup skipped because DATABASE_URL is not a PostgreSQL connection string.");
+      return;
+    }
+    try {
+      await this.$connect();
+    } catch (error) {
+      this.logger.warn(`Prisma startup failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      return;
+    }
     if (this.rlsEnabled) {
       this.logger.log("Row-Level Security enforcement is ON (ENABLE_RLS=true)");
     } else {
@@ -41,7 +52,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 
   async onModuleDestroy() {
-    await this.$disconnect();
+    if (this.canConnect) await this.$disconnect();
   }
 
   /**

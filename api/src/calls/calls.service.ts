@@ -6,8 +6,8 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
 import { AuthenticatedUser } from "../auth/jwt-payload.interface";
+import { SupabaseService } from "../supabase/supabase.service";
 
 /** How long a call may ring before it's written off as missed. */
 const RING_TIMEOUT_MS = 45_000;
@@ -31,7 +31,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CallsService.name);
   private sweeper: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private supabase: SupabaseService) {}
 
   onModuleInit() {
     // A caller who closes the tab mid-ring, or a server restart during a
@@ -50,13 +50,12 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   private async expireStaleRinging(): Promise<void> {
     try {
       const cutoff = new Date(Date.now() - RING_TIMEOUT_MS);
-      const { count } = await this.prisma.call.updateMany({
-        where: { status: "RINGING", startedAt: { lt: cutoff } },
-        data: { status: "MISSED", endedAt: new Date() },
-      });
-      if (count > 0) this.logger.log(`Marked ${count} unanswered call(s) as missed`);
+      const count = await this.supabase.expireStaleCalls(cutoff, new Date());
+      if (count > 0) this.logger.log(`[CALLS] Ring sweep: updated ${count} stale calls`);
     } catch (e) {
-      this.logger.warn(`Ring sweep failed: ${e instanceof Error ? e.message : e}`);
+      const message = e instanceof Error ? e.message : "Unknown Supabase error";
+      this.logger.error(`[CALLS] Ring sweep: FAILED`);
+      this.logger.error(`[CALLS] Error: ${message}`);
     }
   }
 
@@ -67,27 +66,22 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     type: "VOICE" | "VIDEO",
   ) {
     if (calleeId === callerId) throw new BadRequestException("You can't call yourself");
-    const callee = await this.prisma.user.findFirst({
-      where: { id: calleeId, companyId, status: "ACTIVE" },
-      select: { id: true, fullName: true },
-    });
-    if (!callee) throw new BadRequestException("That colleague is not available");
+    const callee = await this.supabase.getCallUserById(calleeId);
+    if (!callee || callee.companyId !== companyId || callee.status !== "ACTIVE") {
+      throw new BadRequestException("That colleague is not available");
+    }
 
-    const caller = await this.prisma.user.findUniqueOrThrow({
-      where: { id: callerId },
-      select: { fullName: true },
-    });
+    const caller = await this.supabase.getCallUserById(callerId);
+    if (!caller) throw new NotFoundException("Caller not found");
 
-    const call = await this.prisma.call.create({
-      data: { companyId, callerId, calleeId, type, status: "RINGING" },
-    });
+    const call = await this.supabase.createCall({ companyId, callerId, calleeId, type });
 
     return { call, callerName: caller.fullName, calleeName: callee.fullName };
   }
 
   /** Guards every signalling hop: only the two parties may touch a call. */
   async assertParticipant(callId: string, userId: string) {
-    const call = await this.prisma.call.findUnique({ where: { id: callId } });
+    const call = await this.supabase.getCallById(callId);
     if (!call) throw new NotFoundException("Call not found");
     if (call.callerId !== userId && call.calleeId !== userId) {
       throw new NotFoundException("Call not found");
@@ -96,43 +90,30 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   }
 
   answer(callId: string) {
-    return this.prisma.call.update({
-      where: { id: callId },
-      data: { status: "ONGOING", answeredAt: new Date() },
-    });
+    return this.supabase.updateCall(callId, { status: "ONGOING", answeredAt: new Date().toISOString() });
   }
 
   async finish(callId: string, status: "ENDED" | "DECLINED" | "MISSED" | "FAILED") {
-    const existing = await this.prisma.call.findUnique({ where: { id: callId } });
+    const existing = await this.supabase.getCallById(callId);
     if (!existing || existing.endedAt) return existing;
     // A call that never got answered ends as MISSED/DECLINED, not ENDED.
     const finalStatus = status === "ENDED" && !existing.answeredAt ? "MISSED" : status;
-    return this.prisma.call.update({
-      where: { id: callId },
-      data: { status: finalStatus, endedAt: new Date() },
-    });
+    return this.supabase.updateCall(callId, { status: finalStatus, endedAt: new Date().toISOString() });
   }
 
   async history(user: AuthenticatedUser): Promise<CallLogDto[]> {
-    const calls = await this.prisma.call.findMany({
-      where: {
-        companyId: user.companyId,
-        OR: [{ callerId: user.id }, { calleeId: user.id }],
-      },
-      orderBy: { startedAt: "desc" },
-      take: 100,
-      include: {
-        caller: { select: { id: true, fullName: true } },
-        callee: { select: { id: true, fullName: true } },
-      },
-    });
+    const calls = await this.supabase.listCallsForUser(user.companyId, user.id);
+    const userIds = [...new Set(calls.flatMap((call) => [call.callerId, call.calleeId]))];
+    const callUsers = await Promise.all(userIds.map((id) => this.supabase.getCallUserById(id)));
+    const usersById = new Map(callUsers.filter((callUser) => callUser).map((callUser) => [callUser!.id, callUser!]));
 
     return calls.map((c) => {
       const out = c.callerId === user.id;
-      const peer = out ? c.callee : c.caller;
+      const peer = usersById.get(out ? c.calleeId : c.callerId);
+      if (!peer) throw new NotFoundException("Call participant not found");
       const duration =
         c.answeredAt && c.endedAt
-          ? Math.round((c.endedAt.getTime() - c.answeredAt.getTime()) / 1000)
+          ? Math.round((new Date(c.endedAt).getTime() - new Date(c.answeredAt).getTime()) / 1000)
           : null;
       return {
         id: c.id,
@@ -141,9 +122,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         direction: out ? "out" : "in",
         peerId: peer.id,
         peerName: peer.fullName,
-        startedAt: c.startedAt.toISOString(),
-        answeredAt: c.answeredAt?.toISOString() ?? null,
-        endedAt: c.endedAt?.toISOString() ?? null,
+        startedAt: c.startedAt,
+        answeredAt: c.answeredAt,
+        endedAt: c.endedAt,
         durationSeconds: duration,
       };
     });

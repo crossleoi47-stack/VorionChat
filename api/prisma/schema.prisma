@@ -81,8 +81,11 @@ model User {
   sessions          Session[]
   assignmentsOwned  ClientAssignment[] @relation("AssignedTo")
   assignmentsMade   ClientAssignment[] @relation("AssignedBy")
+  assignmentsPrevious ClientAssignment[] @relation("PreviousOwner")
   messages          Message[]
   auditLogsAsActor  AuditLog[]
+  departmentsCreated Department[] @relation("DepartmentCreatedBy")
+  departmentsUpdated Department[] @relation("DepartmentUpdatedBy")
   groupMemberships  GroupMember[]
   statuses          Status[]
   statusViews       StatusView[]
@@ -118,16 +121,31 @@ model Session {
 // ── Departments & groups ────────────────────────────────────────────────
 
 model Department {
-  id        String   @id @default(uuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-  name      String
-  createdAt DateTime @default(now())
+  id          String           @id @default(uuid())
+  companyId   String
+  company     Company          @relation(fields: [companyId], references: [id])
+  code        String
+  name        String
+  description String?
+  status      DepartmentStatus @default(ACTIVE)
+  createdById String?
+  createdBy   User?            @relation("DepartmentCreatedBy", fields: [createdById], references: [id])
+  updatedById String?
+  updatedBy   User?            @relation("DepartmentUpdatedBy", fields: [updatedById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   users User[]
 
+  @@unique([companyId, code])
   @@unique([companyId, name])
+  @@index([companyId, status])
   @@map("departments")
+}
+
+enum DepartmentStatus {
+  ACTIVE
+  INACTIVE
 }
 
 model ConversationGroup {
@@ -196,15 +214,20 @@ model ClientAssignment {
   id           String    @id @default(uuid())
   clientId     String
   client       Client    @relation(fields: [clientId], references: [id])
+  previousUserId String?
+  previousUser User?      @relation("PreviousOwner", fields: [previousUserId], references: [id])
   userId       String
   user         User      @relation("AssignedTo", fields: [userId], references: [id])
   assignedById String
   assignedBy   User      @relation("AssignedBy", fields: [assignedById], references: [id])
+  reason       String?
   assignedAt   DateTime  @default(now())
   unassignedAt DateTime?
 
   @@index([clientId, unassignedAt])
   @@index([userId, unassignedAt])
+  @@index([clientId, assignedAt])
+  @@index([previousUserId, assignedAt])
   @@map("client_assignments")
 }
 

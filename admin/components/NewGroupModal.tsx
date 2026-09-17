@@ -12,6 +12,10 @@ interface UserRow {
   status: string;
 }
 
+interface UserListResult {
+  items: UserRow[];
+}
+
 export interface CreatedGroup {
   id: string;
   conversationId: string;
@@ -42,8 +46,11 @@ export function NewGroupModal({
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    api<UserRow[]>("/users")
-      .then((all) => setPeople(all.filter((u) => u.status === "ACTIVE" && u.id !== meId)))
+    api<UserListResult | UserRow[]>("/users")
+      .then((all) => {
+        const rows = Array.isArray(all) ? all : all.items ?? [];
+        setPeople(rows.filter((u) => u.status === "ACTIVE" && u.id !== meId));
+      })
       .catch(() => setLoadError(true));
   }, [meId]);
 
@@ -88,7 +95,9 @@ export function NewGroupModal({
   return (
     <div className="modal-back" onClick={onClose} role="presentation">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{step === "members" ? "Add group members" : "New group"}</h3>
+        <div style={{ padding: "16px 14px 0" }}>
+          <h3 style={{ margin: 0 }}>{step === "members" ? "Add group members" : "New group"}</h3>
+        </div>
 
         {step === "members" ? (
           <>

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { CryptoService } from "../crypto/crypto.service";
@@ -46,6 +46,27 @@ export class WhatsappAccountsService {
     return process.env.PUBLIC_API_URL ?? "https://your-server.example.com";
   }
 
+  private isPrismaUnavailable(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      message.includes("Prisma startup skipped because DATABASE_URL is not a PostgreSQL connection string") ||
+      message.includes("DATABASE_URL") ||
+      message.includes("PrismaClientInitializationError") ||
+      message.includes("Invalid `this.prisma") ||
+      message.includes("Can't reach database server")
+    );
+  }
+
+  private handleWritePathFailure(error: unknown): never {
+    if (this.isPrismaUnavailable(error)) {
+      this.logger.error("[WHATSAPP_ACCOUNTS] Database unavailable for legacy WhatsApp accounts flow");
+      throw new ServiceUnavailableException(
+        "WhatsApp account storage is temporarily unavailable because its database connection is not configured correctly yet.",
+      );
+    }
+    throw error;
+  }
+
   private toDto(a: {
     id: string;
     wabaId: string;
@@ -85,93 +106,105 @@ export class WhatsappAccountsService {
   }
 
   async list(user: AuthenticatedUser): Promise<WhatsappAccountDto[]> {
-    const rows = await this.prisma.whatsappAccount.findMany({
-      where: { companyId: user.companyId },
-      orderBy: { createdAt: "asc" },
-    });
-    return rows.map((r) => this.toDto(r));
+    try {
+      const rows = await this.prisma.whatsappAccount.findMany({
+        where: { companyId: user.companyId },
+        orderBy: { createdAt: "asc" },
+      });
+      return rows.map((r) => this.toDto(r));
+    } catch (error) {
+      if (this.isPrismaUnavailable(error)) {
+        this.logger.warn("[WHATSAPP_ACCOUNTS] Returning empty list because the legacy Prisma data path is unavailable.");
+        return [];
+      }
+      throw error;
+    }
   }
 
   async upsert(input: UpsertAccountInput, user: AuthenticatedUser): Promise<WhatsappAccountDto> {
-    if (!this.crypto.available && (input.accessToken || input.appSecret || input.verifyToken)) {
-      throw new BadRequestException(
-        "The server has no APP_ENCRYPTION_KEY set, so credentials can't be stored securely. Set it and restart before adding tokens.",
-      );
+    try {
+      if (!this.crypto.available && (input.accessToken || input.appSecret || input.verifyToken)) {
+        throw new BadRequestException(
+          "The server has no APP_ENCRYPTION_KEY set, so credentials can't be stored securely. Set it and restart before adding tokens.",
+        );
+      }
+
+      const existing = await this.prisma.whatsappAccount.findUnique({
+        where: { phoneNumberId: input.phoneNumberId },
+      });
+      if (existing && existing.companyId !== user.companyId) {
+        throw new BadRequestException("That phone number ID is already registered.");
+      }
+
+      const secrets = {
+        ...(input.accessToken ? { accessTokenEnc: this.crypto.encrypt(input.accessToken) } : {}),
+        ...(input.appSecret ? { appSecretEnc: this.crypto.encrypt(input.appSecret) } : {}),
+        ...(input.verifyToken ? { verifyTokenEnc: this.crypto.encrypt(input.verifyToken) } : {}),
+      };
+
+      const saved = existing
+        ? await this.prisma.whatsappAccount.update({
+            where: { id: existing.id },
+            data: {
+              wabaId: input.wabaId,
+              displayNumber: input.displayNumber,
+              label: input.label,
+              ...secrets,
+              ...(Object.keys(secrets).length ? { status: "UNVERIFIED" as const, lastError: null } : {}),
+            },
+          })
+        : await this.prisma.whatsappAccount.create({
+            data: {
+              companyId: user.companyId,
+              wabaId: input.wabaId,
+              phoneNumberId: input.phoneNumberId,
+              displayNumber: input.displayNumber,
+              label: input.label,
+              ...secrets,
+            },
+          });
+
+      await this.audit.record({
+        companyId: user.companyId,
+        actorId: user.id,
+        action: existing ? "whatsapp.account.update" : "whatsapp.account.create",
+        target: `whatsapp:${saved.phoneNumberId}`,
+        after: {
+          displayNumber: saved.displayNumber,
+          changed: Object.keys(secrets),
+        },
+      });
+
+      return this.toDto(saved);
+    } catch (error) {
+      this.handleWritePathFailure(error);
     }
-
-    const existing = await this.prisma.whatsappAccount.findUnique({
-      where: { phoneNumberId: input.phoneNumberId },
-    });
-    if (existing && existing.companyId !== user.companyId) {
-      // Never let one tenant claim another tenant's number.
-      throw new BadRequestException("That phone number ID is already registered.");
-    }
-
-    // Only overwrite a secret when a new value was actually supplied — the UI
-    // sends blanks when the admin isn't changing them.
-    const secrets = {
-      ...(input.accessToken ? { accessTokenEnc: this.crypto.encrypt(input.accessToken) } : {}),
-      ...(input.appSecret ? { appSecretEnc: this.crypto.encrypt(input.appSecret) } : {}),
-      ...(input.verifyToken ? { verifyTokenEnc: this.crypto.encrypt(input.verifyToken) } : {}),
-    };
-
-    const saved = existing
-      ? await this.prisma.whatsappAccount.update({
-          where: { id: existing.id },
-          data: {
-            wabaId: input.wabaId,
-            displayNumber: input.displayNumber,
-            label: input.label,
-            ...secrets,
-            ...(Object.keys(secrets).length ? { status: "UNVERIFIED" as const, lastError: null } : {}),
-          },
-        })
-      : await this.prisma.whatsappAccount.create({
-          data: {
-            companyId: user.companyId,
-            wabaId: input.wabaId,
-            phoneNumberId: input.phoneNumberId,
-            displayNumber: input.displayNumber,
-            label: input.label,
-            ...secrets,
-          },
-        });
-
-    await this.audit.record({
-      companyId: user.companyId,
-      actorId: user.id,
-      action: existing ? "whatsapp.account.update" : "whatsapp.account.create",
-      target: `whatsapp:${saved.phoneNumberId}`,
-      // Secrets are never written to the audit trail — only the fact they changed.
-      after: {
-        displayNumber: saved.displayNumber,
-        changed: Object.keys(secrets),
-      },
-    });
-
-    return this.toDto(saved);
   }
 
   async remove(id: string, user: AuthenticatedUser): Promise<void> {
-    const account = await this.prisma.whatsappAccount.findFirst({
-      where: { id, companyId: user.companyId },
-    });
-    if (!account) throw new NotFoundException("WhatsApp account not found");
+    try {
+      const account = await this.prisma.whatsappAccount.findFirst({
+        where: { id, companyId: user.companyId },
+      });
+      if (!account) throw new NotFoundException("WhatsApp account not found");
 
-    const linked = await this.prisma.conversation.count({ where: { whatsappAccountId: id } });
-    if (linked > 0) {
-      throw new BadRequestException(
-        `This number has ${linked} conversation${linked === 1 ? "" : "s"} attached. Removing it would orphan that history — disconnect it in Meta instead, or contact support to migrate.`,
-      );
+      const linked = await this.prisma.conversation.count({ where: { whatsappAccountId: id } });
+      if (linked > 0) {
+        throw new BadRequestException(
+          `This number has ${linked} conversation${linked === 1 ? "" : "s"} attached. Removing it would orphan that history — disconnect it in Meta instead, or contact support to migrate.`,
+        );
+      }
+
+      await this.prisma.whatsappAccount.delete({ where: { id } });
+      await this.audit.record({
+        companyId: user.companyId,
+        actorId: user.id,
+        action: "whatsapp.account.delete",
+        target: `whatsapp:${account.phoneNumberId}`,
+      });
+    } catch (error) {
+      this.handleWritePathFailure(error);
     }
-
-    await this.prisma.whatsappAccount.delete({ where: { id } });
-    await this.audit.record({
-      companyId: user.companyId,
-      actorId: user.id,
-      action: "whatsapp.account.delete",
-      target: `whatsapp:${account.phoneNumberId}`,
-    });
   }
 
   /** Resolve the live access token for a number. Used by the Meta provider. */
@@ -220,44 +253,48 @@ export class WhatsappAccountsService {
    * admin finds out here rather than when the first client message fails.
    */
   async testConnection(id: string, user: AuthenticatedUser): Promise<WhatsappAccountDto> {
-    const account = await this.prisma.whatsappAccount.findFirst({
-      where: { id, companyId: user.companyId },
-    });
-    if (!account) throw new NotFoundException("WhatsApp account not found");
-
-    const token = await this.accessTokenFor(account.phoneNumberId);
-    if (!token) {
-      return this.finishTest(account.id, "ERROR", "No access token stored for this number.");
-    }
-
     try {
-      const res = await fetch(
-        `https://graph.facebook.com/${GRAPH_API_VERSION}/${account.phoneNumberId}?fields=verified_name,display_phone_number,quality_rating`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      const account = await this.prisma.whatsappAccount.findFirst({
+        where: { id, companyId: user.companyId },
+      });
+      if (!account) throw new NotFoundException("WhatsApp account not found");
+
+      const token = await this.accessTokenFor(account.phoneNumberId);
+      if (!token) {
+        return this.finishTest(account.id, "ERROR", "No access token stored for this number.");
+      }
+
+      try {
+        const res = await fetch(
+          `https://graph.facebook.com/${GRAPH_API_VERSION}/${account.phoneNumberId}?fields=verified_name,display_phone_number,quality_rating`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+          return this.finishTest(
+            account.id,
+            "ERROR",
+            body.error?.message ?? `Meta returned ${res.status}`,
+          );
+        }
+        const info = (await res.json()) as { display_phone_number?: string; verified_name?: string };
+        await this.prisma.whatsappAccount.update({
+          where: { id: account.id },
+          data: {
+            displayNumber: info.display_phone_number ?? account.displayNumber,
+            label: account.label ?? info.verified_name ?? null,
+          },
+        });
+        return this.finishTest(account.id, "CONNECTED", null);
+      } catch (e) {
         return this.finishTest(
           account.id,
           "ERROR",
-          body.error?.message ?? `Meta returned ${res.status}`,
+          e instanceof Error ? e.message : "Could not reach Meta",
         );
       }
-      const info = (await res.json()) as { display_phone_number?: string; verified_name?: string };
-      await this.prisma.whatsappAccount.update({
-        where: { id: account.id },
-        data: {
-          displayNumber: info.display_phone_number ?? account.displayNumber,
-          label: account.label ?? info.verified_name ?? null,
-        },
-      });
-      return this.finishTest(account.id, "CONNECTED", null);
-    } catch (e) {
-      return this.finishTest(
-        account.id,
-        "ERROR",
-        e instanceof Error ? e.message : "Could not reach Meta",
-      );
+    } catch (error) {
+      this.handleWritePathFailure(error);
     }
   }
 

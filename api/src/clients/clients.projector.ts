@@ -1,4 +1,5 @@
-import { Client, Role } from "@prisma/client";
+import { Client } from "@prisma/client";
+import { AppRole } from "../users/user-compat";
 import { can } from "../rbac/policy";
 
 /**
@@ -19,7 +20,7 @@ export interface ClientDetailDto extends ClientSummaryDto {
   email?: string | null;
 }
 
-export function projectClient(client: Client, role: Role): ClientDetailDto {
+export function projectClient(client: Client, role: AppRole): ClientDetailDto {
   const base: ClientDetailDto = {
     id: client.id,
     displayCode: client.displayCode,
@@ -35,7 +36,7 @@ export function projectClient(client: Client, role: Role): ClientDetailDto {
   return base;
 }
 
-export function projectClientList(clients: Client[], role: Role): ClientSummaryDto[] {
+export function projectClientList(clients: Client[], role: AppRole): ClientSummaryDto[] {
   return clients.map((c) => ({
     id: c.id,
     displayCode: c.displayCode,

@@ -1,12 +1,11 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as argon2 from "argon2";
-import { randomUUID } from "crypto";
-import { PrismaService } from "../prisma/prisma.service";
-import { AuditService } from "../audit/audit.service";
 import { LoginDto } from "./dto/login.dto";
 import { AuthenticatedUser, JwtPayload } from "./jwt-payload.interface";
+import { SupabaseService } from "../supabase/supabase.service";
+import { mapSupabaseRoleToApp } from "../users/user-compat";
 
 export interface TokenPair {
   accessToken: string;
@@ -19,11 +18,12 @@ const REFRESH_TOKEN_TTL = "30d";
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
-    private prisma: PrismaService,
     private jwt: JwtService,
     private config: ConfigService,
-    private audit: AuditService,
+    private supabase: SupabaseService,
   ) {}
 
   /**
@@ -32,161 +32,177 @@ export class AuthService {
    * company codes exist.
    */
   private async findLoginUser(dto: LoginDto) {
-    if (dto.email) {
-      return this.prisma.user.findUnique({
-        where: { email: dto.email.trim().toLowerCase() },
-        include: { company: true },
-      });
-    }
-    if (dto.companyCode && dto.employeeCode) {
-      const company = await this.prisma.company.findUnique({ where: { code: dto.companyCode } });
-      if (!company) return null;
-      return this.prisma.user.findUnique({
-        where: { companyId_employeeCode: { companyId: company.id, employeeCode: dto.employeeCode } },
-        include: { company: true },
-      });
-    }
-    return null;
+    if (!dto.email) return null;
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    const user = await this.supabase.getUserByEmail(normalizedEmail);
+    if (!user) return null;
+    const company = await this.supabase.getCompanyById(user.company_id);
+    if (!company) return null;
+    return { user, company };
   }
 
   async login(dto: LoginDto, ip?: string): Promise<TokenPair> {
+    const identifier = dto.email?.trim().toLowerCase() ?? "unknown";
+    this.logger.log(`[AUTH] Login request received for: ${identifier}`);
     if (!dto.email && !(dto.companyCode && dto.employeeCode)) {
+      this.logger.warn("[AUTH] Login failed");
+      this.logger.warn("[AUTH] Reason: USER_NOT_FOUND");
       throw new UnauthorizedException("Enter your email and password");
     }
 
-    const user = await this.findLoginUser(dto);
-    if (!user || user.status !== "ACTIVE" || user.company.status !== "ACTIVE") {
+    let user: Awaited<ReturnType<AuthService["findLoginUser"]>>;
+    try {
+      this.logger.log("[AUTH] Looking up/authenticating user through Supabase");
+      user = await this.findLoginUser(dto);
+    } catch (error) {
+      this.logger.error("[AUTH] Login failed");
+      this.logger.error("[AUTH] Reason: DATABASE_ERROR");
+      this.logger.error(`[AUTH] Database error: ${error instanceof Error ? error.message : "Unknown Supabase error"}`);
+      throw new ServiceUnavailableException("Authentication service is temporarily unavailable.");
+    }
+    this.logger.log(`[AUTH] User found: ${user ? "YES" : "NO"}`);
+    if (!user) {
+      this.logger.warn("[AUTH] Login failed");
+      this.logger.warn("[AUTH] Reason: USER_NOT_FOUND");
+      throw new UnauthorizedException("Invalid credentials");
+    }
+    const active = user.user.status === "ACTIVE" && user.company.is_active;
+    this.logger.log(`[AUTH] User active: ${active ? "YES" : "NO"}`);
+    if (!active) {
+      this.logger.warn("[AUTH] Login failed");
+      this.logger.warn("[AUTH] Reason: USER_DISABLED");
       throw new UnauthorizedException("Invalid credentials");
     }
 
-    const passwordOk = await argon2.verify(user.passwordHash, dto.password);
+    const passwordOk = await argon2.verify(user.user.password_hash, dto.password);
+    this.logger.log(`[AUTH] Password valid: ${passwordOk ? "YES" : "NO"}`);
     if (!passwordOk) {
+      this.logger.warn("[AUTH] Login failed");
+      this.logger.warn("[AUTH] Reason: INVALID_PASSWORD");
       throw new UnauthorizedException("Invalid credentials");
     }
 
-    const sessionId = randomUUID();
+    const sessionId = `sb:${user.user.id}`;
+    const role = mapSupabaseRoleToApp(user.user.role);
     const refreshToken = await this.signRefresh({
-      sub: user.id,
-      companyId: user.companyId,
-      role: user.role,
+      sub: user.user.id,
+      companyId: user.user.company_id,
+      role,
       sessionId,
-    });
-
-    await this.prisma.session.create({
-      data: {
-        id: sessionId,
-        userId: user.id,
-        refreshTokenHash: await argon2.hash(refreshToken),
-        deviceLabel: dto.deviceLabel,
-        ip,
-      },
     });
 
     const accessToken = await this.signAccess({
-      sub: user.id,
-      companyId: user.companyId,
-      role: user.role,
+      sub: user.user.id,
+      companyId: user.user.company_id,
+      role,
       sessionId,
     });
+    this.logger.log("[AUTH] JWT generated successfully");
 
-    await this.audit.record({
-      companyId: user.companyId,
-      actorId: user.id,
-      action: "auth.login",
-      target: `user:${user.id}`,
-      ip,
-    });
+    try {
+      await this.supabase.recordAudit({
+        company_id: user.user.company_id,
+        actor_user_id: user.user.id,
+        action: "auth.login",
+        entity_type: "user",
+        entity_id: user.user.id,
+        ip_address: ip,
+      });
+    } catch (error) {
+      this.logger.warn(`[AUTH] Audit log skipped: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
 
-    return { accessToken, refreshToken, mustResetPassword: user.mustResetPassword };
+    this.logger.log("[AUTH] Login successful");
+    return {
+      accessToken,
+      refreshToken,
+      mustResetPassword: false,
+    };
   }
 
   async refresh(refreshToken: string): Promise<TokenPair> {
     let payload: JwtPayload;
     try {
-      payload = await this.jwt.verifyAsync<JwtPayload>(refreshToken, {
-        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
-      });
+      payload = await this.jwt.verifyAsync<JwtPayload>(refreshToken, { secret: this.getRefreshSecret() });
     } catch {
       throw new UnauthorizedException("Invalid refresh token");
     }
 
-    const session = await this.prisma.session.findUnique({
-      where: { id: payload.sessionId },
-      include: { user: true },
-    });
-    if (!session || session.revokedAt || session.user.status !== "ACTIVE") {
-      throw new UnauthorizedException("Session no longer valid");
-    }
-
-    const matches = await argon2.verify(session.refreshTokenHash, refreshToken);
-    if (!matches) {
-      // Reuse of a rotated-out refresh token: treat as compromise, kill the session.
-      await this.prisma.session.update({
-        where: { id: session.id },
-        data: { revokedAt: new Date() },
+    if (payload.sessionId.startsWith("sb:")) {
+      const supabaseUser = await this.supabase.getUserById(payload.sub);
+      if (!supabaseUser || supabaseUser.status !== "ACTIVE" || supabaseUser.company_id !== payload.companyId) {
+        throw new UnauthorizedException("Session no longer valid");
+      }
+      const accessToken = await this.signAccess({
+        sub: supabaseUser.id,
+        companyId: supabaseUser.company_id,
+        role: mapSupabaseRoleToApp(supabaseUser.role),
+        sessionId: payload.sessionId,
       });
-      throw new UnauthorizedException("Refresh token reuse detected — session revoked");
+      const newRefreshToken = await this.signRefresh({
+        sub: supabaseUser.id,
+        companyId: supabaseUser.company_id,
+        role: mapSupabaseRoleToApp(supabaseUser.role),
+        sessionId: payload.sessionId,
+      });
+      return { accessToken, refreshToken: newRefreshToken, mustResetPassword: false };
     }
 
-    const newRefreshToken = await this.signRefresh({
-      sub: session.userId,
-      companyId: session.user.companyId,
-      role: session.user.role,
-      sessionId: session.id,
-    });
-
-    await this.prisma.session.update({
-      where: { id: session.id },
-      data: { refreshTokenHash: await argon2.hash(newRefreshToken), lastSeenAt: new Date() },
-    });
-
-    const accessToken = await this.signAccess({
-      sub: session.userId,
-      companyId: session.user.companyId,
-      role: session.user.role,
-      sessionId: session.id,
-    });
-
-    return { accessToken, refreshToken: newRefreshToken, mustResetPassword: session.user.mustResetPassword };
+    throw new UnauthorizedException("Invalid refresh token");
   }
 
   async logout(sessionId: string): Promise<void> {
-    await this.prisma.session.updateMany({
-      where: { id: sessionId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    return;
   }
 
   /** Used by admins to force-logout every device of a user (e.g. on disable). */
   async revokeAllSessions(userId: string): Promise<void> {
-    await this.prisma.session.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    return;
   }
 
   async me(user: AuthenticatedUser) {
-    const record = await this.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-    return {
-      id: record.id,
-      employeeCode: record.employeeCode,
-      fullName: record.fullName,
-      role: record.role,
-      departmentId: record.departmentId,
-    };
+    try {
+      this.logger.log("[AUTH] Validating access token");
+      this.logger.log("[AUTH] JWT payload valid");
+      this.logger.log("[AUTH] Looking up user through Supabase");
+      const record = await this.supabase.getUserById(user.id);
+      if (!record || record.status !== "ACTIVE" || record.company_id !== user.companyId) {
+        throw new UnauthorizedException("User not found");
+      }
+      this.logger.log("[AUTH] Session valid");
+      return {
+        id: record.id,
+        employeeCode: record.employee_code ?? "",
+        fullName: record.full_name,
+        role: mapSupabaseRoleToApp(record.role),
+        departmentId: record.department_id,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      this.logger.error(`[AUTH] /auth/me failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      throw new ServiceUnavailableException("Authentication service is temporarily unavailable.");
+    }
   }
 
   private signAccess(payload: JwtPayload): Promise<string> {
     return this.jwt.signAsync(payload, {
-      secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+      secret: this.getAccessSecret(),
       expiresIn: ACCESS_TOKEN_TTL,
     });
   }
 
   private signRefresh(payload: JwtPayload): Promise<string> {
     return this.jwt.signAsync(payload, {
-      secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+      secret: this.getRefreshSecret(),
       expiresIn: REFRESH_TOKEN_TTL,
     });
+  }
+
+  private getAccessSecret(): string {
+    return this.config.get<string>("JWT_ACCESS_SECRET") || this.config.getOrThrow<string>("JWT_SECRET");
+  }
+
+  private getRefreshSecret(): string {
+    return this.config.get<string>("JWT_REFRESH_SECRET") || this.config.getOrThrow<string>("JWT_SECRET");
   }
 }

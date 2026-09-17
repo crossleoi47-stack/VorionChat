@@ -1,4 +1,4 @@
-import { Role } from "@prisma/client";
+import { AppRole } from "../users/user-compat";
 
 export type Resource =
   | "client"
@@ -12,7 +12,7 @@ export type Resource =
   | "whatsapp_account"
   | "audit_log";
 
-export type Action = "read" | "create" | "update" | "disable" | "reassign" | "export";
+export type Action = "read" | "create" | "update" | "delete" | "disable" | "reassign" | "export";
 
 /**
  * The single source of truth for "who can do what." Route guards and
@@ -27,13 +27,13 @@ export type Action = "read" | "create" | "update" | "disable" | "reassign" | "ex
  * add it as a scope check in the relevant service once that's needed,
  * without changing this file's structure).
  */
-const POLICY: Record<Role, Partial<Record<Resource, Action[]>>> = {
+const POLICY: Record<"SUPER_ADMIN" | "COMPANY_ADMIN" | "MANAGER" | "EMPLOYEE" | "AUDITOR", Partial<Record<Resource, Action[]>>> = {
   SUPER_ADMIN: {
     client: ["read", "create", "update"],
     "client.phone": ["read"],
-    user: ["read", "create", "update", "disable"],
+    user: ["read", "create", "update", "delete", "disable"],
     assignment: ["read", "reassign"],
-    department: ["read", "create", "update"],
+    department: ["read", "create", "update", "delete"],
     group: ["read", "create", "update"],
     conversation: ["read"],
     message: ["read", "create"],
@@ -83,6 +83,17 @@ const POLICY: Record<Role, Partial<Record<Resource, Action[]>>> = {
   },
 };
 
-export function can(role: Role, resource: Resource, action: Action): boolean {
-  return POLICY[role]?.[resource]?.includes(action) ?? false;
+function normalizeRole(role: AppRole): "SUPER_ADMIN" | "COMPANY_ADMIN" | "MANAGER" | "EMPLOYEE" | "AUDITOR" {
+  switch (role) {
+    case "ADMIN":
+      return "COMPANY_ADMIN";
+    case "VA":
+      return "EMPLOYEE";
+    default:
+      return role;
+  }
+}
+
+export function can(role: AppRole, resource: Resource, action: Action): boolean {
+  return POLICY[normalizeRole(role)]?.[resource]?.includes(action) ?? false;
 }

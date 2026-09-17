@@ -13,6 +13,10 @@ interface UserRow {
   status: string;
 }
 
+interface UserListResult {
+  items: UserRow[];
+}
+
 /** Pick a colleague to open (or reopen) a 1:1 staff chat. */
 export function NewChatModal({
   meId,
@@ -31,8 +35,11 @@ export function NewChatModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api<UserRow[]>("/users")
-      .then((all) => setPeople(all.filter((u) => u.status === "ACTIVE" && u.id !== meId)))
+    api<UserListResult | UserRow[]>("/users")
+      .then((all) => {
+        const rows = Array.isArray(all) ? all : all.items ?? [];
+        setPeople(rows.filter((u) => u.status === "ACTIVE" && u.id !== meId));
+      })
       .catch(() => setError("Could not load the staff list — your role may not be allowed to list users."));
   }, [meId]);
 
@@ -65,7 +72,9 @@ export function NewChatModal({
   return (
     <div className="modal-back" onClick={onClose} role="presentation">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>New chat</h3>
+        <div style={{ padding: "16px 14px 0" }}>
+          <h3 style={{ margin: 0 }}>New chat</h3>
+        </div>
 
         <div style={{ padding: "10px 14px" }}>
           <div className="search-box">

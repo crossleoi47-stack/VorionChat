@@ -20,6 +20,7 @@ import {
   IconStatus,
   IconTeam,
   IconTransfer,
+  IconUser,
 } from "@/components/Icons";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -47,7 +48,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const admin = [
     { href: "/", label: "Dashboard", Icon: IconDashboard, show: true },
-    { href: "/employees", label: "Employees", Icon: IconTeam, show: canManageEmployees },
+    { href: "/departments", label: "Departments", Icon: IconTeam, show: canManageEmployees },
+    { href: "/employees", label: "Employees", Icon: IconUser, show: canManageEmployees },
     { href: "/assignments", label: "Assignments", Icon: IconTransfer, show: canReassign },
     { href: "/controls", label: "Controls", Icon: IconShield, show: canManageEmployees },
     { href: "/oversight", label: "Oversight", Icon: IconEye, show: canSeeAudit },

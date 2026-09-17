@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api, apiUpload } from "@/lib/api";
-import { getSocket } from "@/lib/socket";
+import { clearTokens } from "@/lib/api";
+import { getSocket, resetSocket } from "@/lib/socket";
 import { useCurrentUser } from "@/lib/useCurrentUser";
 import { Avatar } from "@/components/Avatar";
 import { NewGroupModal } from "@/components/NewGroupModal";
@@ -35,6 +38,7 @@ import {
   IconStar,
   IconStop,
   IconTrash,
+  IconShield,
   IconVideo,
 } from "@/components/Icons";
 
@@ -153,6 +157,7 @@ function splitPrefix(body: string | null): { sender: string | null; text: string
 
 export default function InboxPage() {
   const { user } = useCurrentUser();
+  const router = useRouter();
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [lastMsg, setLastMsg] = useState<Record<string, Message>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -177,6 +182,8 @@ export default function InboxPage() {
   const [newGroup, setNewGroup] = useState(false);
   const [newChat, setNewChat] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -200,6 +207,8 @@ export default function InboxPage() {
     setMenuFor(null);
     setRxFor(null);
     setAttachOpen(false);
+    setHeaderMenuOpen(false);
+    setLogoutConfirm(false);
   }, []);
 
   // Escape closes popovers and cancels reply/edit. Outside-clicks are handled
@@ -544,20 +553,174 @@ export default function InboxPage() {
       <div className="chat-list-pane">
         <div className="pane-head">
           <span className="pane-title">{showArchived ? "Archived" : "Chats"}</span>
-          <div className="pane-head-actions">
+          <div className="pane-head-actions" style={{ position: "relative" }}>
             <button
               className="head-btn"
               title="New chat"
               aria-label="New chat"
-              onClick={() => setNewChat(true)}
+              onClick={() => {
+                setHeaderMenuOpen(false);
+                setNewChat(true);
+              }}
             >
               <IconNewChat />
             </button>
-            <button className="head-btn" title="Menu" aria-label="Menu">
+            <button
+              className="head-btn"
+              title="Menu"
+              aria-label="Menu"
+              onClick={() => setHeaderMenuOpen((v) => !v)}
+            >
               <IconMenu />
             </button>
+            {headerMenuOpen && (
+              <div
+                role="menu"
+                aria-label="Chats menu"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 8px)",
+                  right: 0,
+                  minWidth: 300,
+                  padding: 10,
+                  background: "#fff",
+                  border: "1px solid rgba(134, 150, 160, 0.18)",
+                  borderRadius: 16,
+                  boxShadow: "0 20px 45px rgba(15, 23, 42, 0.14)",
+                  overflow: "visible",
+                  zIndex: 90,
+                }}
+              >
+                <button
+                  className="pick-row"
+                  role="menuitem"
+                  onClick={() => {
+                    setHeaderMenuOpen(false);
+                    setShowArchived((v) => !v);
+                  }}
+                  style={{ width: "100%", padding: "12px 12px", borderRadius: 10, alignItems: "center", transition: "background-color 0.16s ease, transform 0.16s ease" }}
+                >
+                  <span
+                    className="avatar md"
+                    style={{ width: 42, height: 42, minWidth: 42, borderRadius: 12, background: "rgba(79, 70, 229, 0.10)", color: "rgb(67, 56, 202)", fontSize: "1.1rem" }}
+                  >
+                    <IconArchive size={18} />
+                  </span>
+                  <span className="pk-main" style={{ gap: 3 }}>
+                    <span className="pk-name" style={{ fontSize: 15.5, fontWeight: 600 }}>
+                      {showArchived ? "Back to chats" : "Archived chats"}
+                    </span>
+                    <span className="pk-sub" style={{ fontSize: 12.5, color: "rgba(71, 85, 105, 0.9)" }}>
+                      Show archived conversations
+                    </span>
+                  </span>
+                </button>
+                <div style={{ height: 1, background: "rgba(148, 163, 184, 0.18)", margin: "4px 10px" }} />
+                <Link
+                  className="pick-row"
+                  role="menuitem"
+                  href="/profile"
+                  onClick={() => setHeaderMenuOpen(false)}
+                  style={{ width: "100%", padding: "12px 12px", borderRadius: 10, alignItems: "center", transition: "background-color 0.16s ease, transform 0.16s ease" }}
+                >
+                  <span
+                    className="avatar md"
+                    style={{ width: 42, height: 42, minWidth: 42, borderRadius: 12, background: "rgba(16, 185, 129, 0.10)", color: "rgb(5, 150, 105)", fontSize: "1.1rem" }}
+                  >
+                    <IconPencil size={18} />
+                  </span>
+                  <span className="pk-main" style={{ gap: 3 }}>
+                    <span className="pk-name" style={{ fontSize: 15.5, fontWeight: 600 }}>
+                      My profile
+                    </span>
+                    <span className="pk-sub" style={{ fontSize: 12.5, color: "rgba(71, 85, 105, 0.9)" }}>
+                      View your account
+                    </span>
+                  </span>
+                </Link>
+                <Link
+                  className="pick-row"
+                  role="menuitem"
+                  href="/settings"
+                  onClick={() => setHeaderMenuOpen(false)}
+                  style={{ width: "100%", padding: "12px 12px", borderRadius: 10, alignItems: "center", transition: "background-color 0.16s ease, transform 0.16s ease" }}
+                >
+                  <span
+                    className="avatar md"
+                    style={{ width: 42, height: 42, minWidth: 42, borderRadius: 12, background: "rgba(6, 182, 212, 0.10)", color: "rgb(8, 145, 178)", fontSize: "1.1rem" }}
+                  >
+                    <IconShield size={18} />
+                  </span>
+                  <span className="pk-main" style={{ gap: 3 }}>
+                    <span className="pk-name" style={{ fontSize: 15.5, fontWeight: 600 }}>
+                      Settings
+                    </span>
+                    <span className="pk-sub" style={{ fontSize: 12.5, color: "rgba(71, 85, 105, 0.9)" }}>
+                      Account preferences
+                    </span>
+                  </span>
+                </Link>
+                <div style={{ height: 1, background: "rgba(148, 163, 184, 0.18)", margin: "4px 10px" }} />
+                <button
+                  className="pick-row"
+                  role="menuitem"
+                  onClick={() => {
+                    setHeaderMenuOpen(false);
+                    setLogoutConfirm(true);
+                  }}
+                  style={{ width: "100%", padding: "12px 12px", borderRadius: 10, alignItems: "center", transition: "background-color 0.16s ease, transform 0.16s ease" }}
+                >
+                  <span
+                    className="avatar md"
+                    style={{ width: 42, height: 42, minWidth: 42, borderRadius: 12, background: "rgba(239, 68, 68, 0.10)", color: "rgb(220, 38, 38)", fontSize: "1.1rem" }}
+                  >
+                    ↪
+                  </span>
+                  <span className="pk-main" style={{ gap: 3 }}>
+                    <span className="pk-name" style={{ fontSize: 15.5, fontWeight: 600 }}>
+                      Logout
+                    </span>
+                    <span className="pk-sub" style={{ fontSize: 12.5, color: "rgba(71, 85, 105, 0.9)" }}>
+                      Sign out of Vorion Chat
+                    </span>
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
+        {logoutConfirm && (
+          <div className="modal-back" onClick={() => setLogoutConfirm(false)} role="presentation">
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div style={{ padding: 18 }}>
+                <h3 style={{ marginTop: 0 }}>Logout?</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Are you sure you want to log out of Vorion Chat?
+                </p>
+              </div>
+              <div className="modal-foot" style={{ gap: 8 }}>
+                <button onClick={() => setLogoutConfirm(false)}>Cancel</button>
+                <button
+                  className="primary"
+                  onClick={async () => {
+                    try {
+                      await api("/auth/logout", { method: "POST" });
+                    } catch {
+                      // If the server session is already gone, still clear local auth.
+                    } finally {
+                      resetSocket();
+                      clearTokens();
+                      router.replace("/login");
+                    }
+                  }}
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="search-row">
           <div className="search-box">

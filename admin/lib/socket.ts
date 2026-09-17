@@ -1,6 +1,6 @@
 import { io, Socket } from "socket.io-client";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3000/api";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3010/api";
 const SOCKET_BASE = API_BASE.replace(/\/api\/?$/, "");
 
 let socket: Socket | null = null;

@@ -22,9 +22,13 @@ export default function LoginPage() {
         body: { email: email.trim().toLowerCase(), password },
       });
       setTokens(result.accessToken, result.refreshToken);
-      router.push("/");
+      router.replace("/inbox");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Login failed");
+      if (err instanceof ApiError && err.status === 429) {
+        setError("Too many login attempts. Please wait a moment and try again.");
+      } else {
+        setError(err instanceof ApiError ? err.message : "Login failed");
+      }
     } finally {
       setLoading(false);
     }

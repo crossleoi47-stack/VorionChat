@@ -390,7 +390,7 @@ cp .env.example .env
 npm install
 DATABASE_URL="postgresql://custodian_admin:custodian_admin_dev_password@localhost:5432/custodian?schema=public" npx prisma migrate dev --name init
 npm run seed        # creates company ABC, admin ADMIN-1, employee EMP-1024, a demo client
-npm run start:dev   # http://localhost:3000/api — change PORT in .env if something else already owns 3000
+npm run start:dev   # http://localhost:3010/api — change PORT in .env if something else already owns 3010
 
 # 3. Admin dashboard (separate terminal)
 cd admin

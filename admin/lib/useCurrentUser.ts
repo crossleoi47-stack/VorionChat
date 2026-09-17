@@ -16,6 +16,7 @@ export interface CurrentUser {
 // permission check independently; hiding a nav link just avoids sending an
 // employee to a page that will only ever 403 for them.
 const ADMIN_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+const SUPER_ADMIN_ROLES = new Set(["SUPER_ADMIN"]);
 const CAN_REASSIGN = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "MANAGER"]);
 const CAN_SEE_AUDIT = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "AUDITOR"]);
 
@@ -26,6 +27,7 @@ export function useCurrentUser() {
   useEffect(() => {
     api<CurrentUser>("/auth/me")
       .then(setUser)
+      .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);
 
@@ -33,6 +35,7 @@ export function useCurrentUser() {
     user,
     loading,
     canManageEmployees: !!user && ADMIN_ROLES.has(user.role),
+    canDeleteDepartments: !!user && SUPER_ADMIN_ROLES.has(user.role),
     canReassign: !!user && CAN_REASSIGN.has(user.role),
     canSeeAudit: !!user && CAN_SEE_AUDIT.has(user.role),
   };

@@ -11,9 +11,15 @@ async function main() {
   });
 
   const sales = await prisma.department.upsert({
-    where: { companyId_name: { companyId: company.id, name: "Sales" } },
-    update: {},
-    create: { companyId: company.id, name: "Sales" },
+    where: { companyId_code: { companyId: company.id, code: "DEP-001" } },
+    update: { name: "Sales", description: "Sales team", status: "ACTIVE" },
+    create: {
+      companyId: company.id,
+      code: "DEP-001",
+      name: "Sales",
+      description: "Sales team",
+      status: "ACTIVE",
+    },
   });
 
   const adminPassword = "ChangeMe123!";

@@ -3,6 +3,7 @@ import { Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../auth/jwt-payload.interface";
+import { SupabaseService } from "../supabase/supabase.service";
 import { Feature, FeatureMap, resolveFeatures } from "./features";
 import { DEFAULT_DLP, DlpConfig, DlpHit, describeHits, scanText } from "./dlp";
 
@@ -16,14 +17,11 @@ export class PolicyService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private supabase: SupabaseService,
   ) {}
 
   private async settings(companyId: string): Promise<CompanySettings> {
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { settings: true },
-    });
-    return (company?.settings as CompanySettings) ?? {};
+    return (await this.supabase.getCompanySettings(companyId)) as CompanySettings;
   }
 
   async featuresFor(userId: string): Promise<FeatureMap> {
@@ -125,10 +123,7 @@ export class PolicyService {
     const before = { ...DEFAULT_DLP, ...(s.dlp ?? {}) };
     const next = { ...before, ...config };
 
-    await this.prisma.company.update({
-      where: { id: admin.companyId },
-      data: { settings: { ...s, dlp: next } as object },
-    });
+    await this.supabase.updateCompanySettings(admin.companyId, { ...s, dlp: next });
 
     await this.audit.record({
       companyId: admin.companyId,
