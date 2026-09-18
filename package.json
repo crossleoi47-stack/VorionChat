@@ -1,0 +1,16 @@
+{
+  "name": "vorion-chat",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "admin"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @custodian/admin",
+    "build": "npm run build --workspace @custodian/admin",
+    "start": "npm run start --workspace @custodian/admin"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
