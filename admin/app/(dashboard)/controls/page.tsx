@@ -12,6 +12,13 @@ interface UserRow {
   status: string;
 }
 
+interface UserListResponse {
+  items: UserRow[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
 interface CatalogItem {
   key: string;
   label: string;
@@ -48,8 +55,8 @@ export default function ControlsPage() {
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
-    api<UserRow[]>("/users")
-      .then((all) => setUsers(all.filter((u) => u.status === "ACTIVE")))
+    api<UserListResponse>("/users")
+      .then(({ items }) => setUsers(items.filter((u) => u.status === "ACTIVE")))
       .catch(() => setError("You don't have permission to manage controls."));
     api<Catalog>("/policy/catalog").then(setCatalog).catch(() => {});
     api<DlpConfig>("/policy/dlp").then(setDlp).catch(() => {});

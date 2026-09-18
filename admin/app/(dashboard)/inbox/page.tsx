@@ -549,13 +549,142 @@ export default function InboxPage() {
 
   return (
     <>
+      {/* ── Scoped visual polish. New "vc-" classes only — nothing existing is
+          renamed, so any shared styling from the app's global stylesheet still
+          applies underneath these. ── */}
+      <style>{`
+        .vc-icon-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 10px;
+          transition: background-color 0.15s ease, color 0.15s ease;
+        }
+        .vc-icon-btn:hover:not(:disabled) { background: rgba(15, 23, 42, 0.06); }
+        .vc-icon-btn:active:not(:disabled) { background: rgba(15, 23, 42, 0.1); }
+        .vc-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+        .vc-pane-title { font-size: 20px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em; }
+
+        .vc-search {
+          background: #f1f5f9;
+          border-radius: 12px;
+          border: 1px solid transparent;
+          transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .vc-search:focus-within {
+          background: #fff;
+          border-color: rgba(79, 70, 229, 0.35);
+          box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.08);
+        }
+        .vc-search input { background: transparent !important; }
+        .vc-search-icon { color: #94a3b8; }
+
+        .vc-chip {
+          border: none;
+          background: #f1f5f9;
+          color: #475569;
+          font-weight: 500;
+          border-radius: 999px;
+          transition: background-color 0.15s ease, color 0.15s ease;
+        }
+        .vc-chip:hover { background: #e2e8f0; }
+        .vc-chip-on { background: #eef2ff !important; color: #4338ca !important; font-weight: 600; }
+
+        .vc-archived {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          border-radius: 10px;
+          transition: background-color 0.15s ease;
+        }
+        .vc-archived:hover { background: #f8fafc; }
+        .vc-arch-icon {
+          width: 34px;
+          height: 34px;
+          min-width: 34px;
+          border-radius: 9px;
+          background: rgba(79, 70, 229, 0.08);
+          color: #4338ca;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .vc-arch-count {
+          margin-left: auto;
+          background: #eef2ff;
+          color: #4338ca;
+          font-size: 12px;
+          font-weight: 700;
+          padding: 2px 9px;
+          border-radius: 999px;
+        }
+
+        .vc-empty-list {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          padding: 48px 24px;
+          color: #94a3b8;
+          text-align: center;
+        }
+        .vc-empty-list-icon {
+          width: 52px;
+          height: 52px;
+          border-radius: 16px;
+          background: #f1f5f9;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #94a3b8;
+        }
+        .vc-empty-list-text { font-size: 13.5px; }
+
+        .vc-empty-panel {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          height: 100%;
+          text-align: center;
+          padding: 40px;
+        }
+        .vc-empty-icon {
+          width: 76px;
+          height: 76px;
+          border-radius: 22px;
+          background: linear-gradient(135deg, #eef2ff, #e0f2fe);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #6366f1;
+          margin-bottom: 22px;
+        }
+        .vc-empty-panel h2 {
+          font-size: 22px;
+          font-weight: 700;
+          color: #0f172a;
+          margin: 0 0 10px;
+          letter-spacing: -0.01em;
+        }
+        .vc-empty-panel p {
+          font-size: 14.5px;
+          color: #64748b;
+          line-height: 1.65;
+          max-width: 400px;
+          margin: 0;
+        }
+      `}</style>
+
       {/* ── Chat list ── */}
       <div className="chat-list-pane">
         <div className="pane-head">
-          <span className="pane-title">{showArchived ? "Archived" : "Chats"}</span>
+          <span className="pane-title vc-pane-title">{showArchived ? "Archived" : "Chats"}</span>
           <div className="pane-head-actions" style={{ position: "relative" }}>
             <button
-              className="head-btn"
+              className="head-btn vc-icon-btn"
               title="New chat"
               aria-label="New chat"
               onClick={() => {
@@ -566,7 +695,7 @@ export default function InboxPage() {
               <IconNewChat />
             </button>
             <button
-              className="head-btn"
+              className="head-btn vc-icon-btn"
               title="Menu"
               aria-label="Menu"
               onClick={() => setHeaderMenuOpen((v) => !v)}
@@ -574,119 +703,135 @@ export default function InboxPage() {
               <IconMenu />
             </button>
             {headerMenuOpen && (
-              <div
-                role="menu"
-                aria-label="Chats menu"
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 8px)",
-                  right: 0,
-                  minWidth: 300,
-                  padding: 10,
-                  background: "#fff",
-                  border: "1px solid rgba(134, 150, 160, 0.18)",
-                  borderRadius: 16,
-                  boxShadow: "0 20px 45px rgba(15, 23, 42, 0.14)",
-                  overflow: "visible",
-                  zIndex: 90,
-                }}
-              >
-                <button
-                  className="pick-row"
-                  role="menuitem"
-                  onClick={() => {
-                    setHeaderMenuOpen(false);
-                    setShowArchived((v) => !v);
-                  }}
-                  style={{ width: "100%", padding: "12px 12px", borderRadius: 10, alignItems: "center", transition: "background-color 0.16s ease, transform 0.16s ease" }}
-                >
-                  <span
-                    className="avatar md"
-                    style={{ width: 42, height: 42, minWidth: 42, borderRadius: 12, background: "rgba(79, 70, 229, 0.10)", color: "rgb(67, 56, 202)", fontSize: "1.1rem" }}
+              <>
+                <style>{`
+                  .vc-menu {
+                    position: absolute;
+                    top: calc(100% + 10px);
+                    right: 0;
+                    min-width: 268px;
+                    padding: 6px;
+                    background: #fff;
+                    border: 1px solid rgba(15, 23, 42, 0.06);
+                    border-radius: 14px;
+                    box-shadow:
+                      0 1px 2px rgba(15, 23, 42, 0.04),
+                      0 12px 28px rgba(15, 23, 42, 0.12);
+                    z-index: 90;
+                    transform-origin: top right;
+                    animation: vc-menu-in 0.12s ease-out;
+                  }
+                  @keyframes vc-menu-in {
+                    from { opacity: 0; transform: scale(0.97) translateY(-4px); }
+                    to   { opacity: 1; transform: scale(1) translateY(0); }
+                  }
+                  .vc-menu::before {
+                    content: "";
+                    position: absolute;
+                    top: -5px;
+                    right: 18px;
+                    width: 10px;
+                    height: 10px;
+                    background: #fff;
+                    border-left: 1px solid rgba(15, 23, 42, 0.06);
+                    border-top: 1px solid rgba(15, 23, 42, 0.06);
+                    transform: rotate(45deg);
+                    border-radius: 2px 0 0 0;
+                  }
+                  .vc-menu-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    width: 100%;
+                    padding: 9px 10px;
+                    border-radius: 9px;
+                    background: transparent;
+                    border: none;
+                    cursor: pointer;
+                    text-align: left;
+                    text-decoration: none !important;
+                    color: inherit;
+                  }
+                  .vc-menu-item, .vc-menu-item * { text-decoration: none !important; }
+                  .vc-menu-item:hover { background: rgba(15, 23, 42, 0.045); }
+                  .vc-menu-item:active { background: rgba(15, 23, 42, 0.07); }
+                  .vc-menu-icon {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 36px;
+                    height: 36px;
+                    min-width: 36px;
+                    border-radius: 10px;
+                    font-size: 1rem;
+                  }
+                  .vc-menu-name { font-size: 14.5px; font-weight: 600; color: #0f172a; line-height: 1.3; }
+                  .vc-menu-sub { font-size: 12px; color: #64748b; line-height: 1.3; margin-top: 1px; }
+                  .vc-menu-sep { height: 1px; background: rgba(15, 23, 42, 0.07); margin: 5px 8px; }
+                  .vc-menu-item.destructive:hover { background: rgba(220, 38, 38, 0.06); }
+                  .vc-menu-item.destructive:hover .vc-menu-name { color: #dc2626; }
+                `}</style>
+
+                <div role="menu" aria-label="Chats menu" onClick={(e) => e.stopPropagation()} className="vc-menu">
+                  <button
+                    className="vc-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setHeaderMenuOpen(false);
+                      setShowArchived((v) => !v);
+                    }}
                   >
-                    <IconArchive size={18} />
-                  </span>
-                  <span className="pk-main" style={{ gap: 3 }}>
-                    <span className="pk-name" style={{ fontSize: 15.5, fontWeight: 600 }}>
-                      {showArchived ? "Back to chats" : "Archived chats"}
+                    <span className="vc-menu-icon" style={{ background: "rgba(79, 70, 229, 0.10)", color: "rgb(67, 56, 202)" }}>
+                      <IconArchive size={17} />
                     </span>
-                    <span className="pk-sub" style={{ fontSize: 12.5, color: "rgba(71, 85, 105, 0.9)" }}>
-                      Show archived conversations
+                    <span>
+                      <div className="vc-menu-name">{showArchived ? "Back to chats" : "Archived chats"}</div>
+                      <div className="vc-menu-sub">Show archived conversations</div>
                     </span>
-                  </span>
-                </button>
-                <div style={{ height: 1, background: "rgba(148, 163, 184, 0.18)", margin: "4px 10px" }} />
-                <Link
-                  className="pick-row"
-                  role="menuitem"
-                  href="/profile"
-                  onClick={() => setHeaderMenuOpen(false)}
-                  style={{ width: "100%", padding: "12px 12px", borderRadius: 10, alignItems: "center", transition: "background-color 0.16s ease, transform 0.16s ease" }}
-                >
-                  <span
-                    className="avatar md"
-                    style={{ width: 42, height: 42, minWidth: 42, borderRadius: 12, background: "rgba(16, 185, 129, 0.10)", color: "rgb(5, 150, 105)", fontSize: "1.1rem" }}
+                  </button>
+
+                  <div className="vc-menu-sep" />
+
+                  <Link className="vc-menu-item" role="menuitem" href="/profile" onClick={() => setHeaderMenuOpen(false)}>
+                    <span className="vc-menu-icon" style={{ background: "rgba(16, 185, 129, 0.10)", color: "rgb(5, 150, 105)" }}>
+                      <IconPencil size={17} />
+                    </span>
+                    <span>
+                      <div className="vc-menu-name">My profile</div>
+                      <div className="vc-menu-sub">View your account</div>
+                    </span>
+                  </Link>
+
+                  <Link className="vc-menu-item" role="menuitem" href="/settings" onClick={() => setHeaderMenuOpen(false)}>
+                    <span className="vc-menu-icon" style={{ background: "rgba(6, 182, 212, 0.10)", color: "rgb(8, 145, 178)" }}>
+                      <IconShield size={17} />
+                    </span>
+                    <span>
+                      <div className="vc-menu-name">Settings</div>
+                      <div className="vc-menu-sub">Account preferences</div>
+                    </span>
+                  </Link>
+
+                  <div className="vc-menu-sep" />
+
+                  <button
+                    className="vc-menu-item destructive"
+                    role="menuitem"
+                    onClick={() => {
+                      setHeaderMenuOpen(false);
+                      setLogoutConfirm(true);
+                    }}
                   >
-                    <IconPencil size={18} />
-                  </span>
-                  <span className="pk-main" style={{ gap: 3 }}>
-                    <span className="pk-name" style={{ fontSize: 15.5, fontWeight: 600 }}>
-                      My profile
+                    <span className="vc-menu-icon" style={{ background: "rgba(239, 68, 68, 0.10)", color: "rgb(220, 38, 38)" }}>
+                      ↪
                     </span>
-                    <span className="pk-sub" style={{ fontSize: 12.5, color: "rgba(71, 85, 105, 0.9)" }}>
-                      View your account
+                    <span>
+                      <div className="vc-menu-name">Logout</div>
+                      <div className="vc-menu-sub">Sign out of Vorion Chat</div>
                     </span>
-                  </span>
-                </Link>
-                <Link
-                  className="pick-row"
-                  role="menuitem"
-                  href="/settings"
-                  onClick={() => setHeaderMenuOpen(false)}
-                  style={{ width: "100%", padding: "12px 12px", borderRadius: 10, alignItems: "center", transition: "background-color 0.16s ease, transform 0.16s ease" }}
-                >
-                  <span
-                    className="avatar md"
-                    style={{ width: 42, height: 42, minWidth: 42, borderRadius: 12, background: "rgba(6, 182, 212, 0.10)", color: "rgb(8, 145, 178)", fontSize: "1.1rem" }}
-                  >
-                    <IconShield size={18} />
-                  </span>
-                  <span className="pk-main" style={{ gap: 3 }}>
-                    <span className="pk-name" style={{ fontSize: 15.5, fontWeight: 600 }}>
-                      Settings
-                    </span>
-                    <span className="pk-sub" style={{ fontSize: 12.5, color: "rgba(71, 85, 105, 0.9)" }}>
-                      Account preferences
-                    </span>
-                  </span>
-                </Link>
-                <div style={{ height: 1, background: "rgba(148, 163, 184, 0.18)", margin: "4px 10px" }} />
-                <button
-                  className="pick-row"
-                  role="menuitem"
-                  onClick={() => {
-                    setHeaderMenuOpen(false);
-                    setLogoutConfirm(true);
-                  }}
-                  style={{ width: "100%", padding: "12px 12px", borderRadius: 10, alignItems: "center", transition: "background-color 0.16s ease, transform 0.16s ease" }}
-                >
-                  <span
-                    className="avatar md"
-                    style={{ width: 42, height: 42, minWidth: 42, borderRadius: 12, background: "rgba(239, 68, 68, 0.10)", color: "rgb(220, 38, 38)", fontSize: "1.1rem" }}
-                  >
-                    ↪
-                  </span>
-                  <span className="pk-main" style={{ gap: 3 }}>
-                    <span className="pk-name" style={{ fontSize: 15.5, fontWeight: 600 }}>
-                      Logout
-                    </span>
-                    <span className="pk-sub" style={{ fontSize: 12.5, color: "rgba(71, 85, 105, 0.9)" }}>
-                      Sign out of Vorion Chat
-                    </span>
-                  </span>
-                </button>
-              </div>
+                  </button>
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -723,8 +868,8 @@ export default function InboxPage() {
         )}
 
         <div className="search-row">
-          <div className="search-box">
-            <span className="s-icon">
+          <div className="search-box vc-search">
+            <span className="s-icon vc-search-icon">
               <IconSearch size={18} />
             </span>
             <input
@@ -738,17 +883,20 @@ export default function InboxPage() {
 
         {!showArchived && (
           <div className="filter-row">
-            <button className={`chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
+            <button
+              className={`chip vc-chip ${filter === "all" ? "on vc-chip-on" : ""}`}
+              onClick={() => setFilter("all")}
+            >
               All
             </button>
             <button
-              className={`chip ${filter === "unread" ? "on" : ""}`}
+              className={`chip vc-chip ${filter === "unread" ? "on vc-chip-on" : ""}`}
               onClick={() => setFilter("unread")}
             >
               Unread{unreadTotal > 0 ? ` ${unreadTotal}` : ""}
             </button>
             <button
-              className={`chip ${filter === "groups" ? "on" : ""}`}
+              className={`chip vc-chip ${filter === "groups" ? "on vc-chip-on" : ""}`}
               onClick={() => setFilter("groups")}
             >
               Groups
@@ -756,12 +904,12 @@ export default function InboxPage() {
           </div>
         )}
 
-        <button className="archived-row" type="button" onClick={() => setShowArchived((v) => !v)}>
-          <span className="arch-icon">
-            <IconArchive size={19} />
+        <button className="archived-row vc-archived" type="button" onClick={() => setShowArchived((v) => !v)}>
+          <span className="arch-icon vc-arch-icon">
+            <IconArchive size={17} />
           </span>
           {showArchived ? "Back to chats" : "Archived"}
-          {!showArchived && <span className="arch-count">{archivedCount}</span>}
+          {!showArchived && <span className="arch-count vc-arch-count">{archivedCount}</span>}
         </button>
 
         <div className="chat-rows">
@@ -798,8 +946,13 @@ export default function InboxPage() {
             </button>
           ))}
           {rows.length === 0 && (
-            <div style={{ padding: 20 }} className="muted">
-              {search || filter !== "all" ? "No chats match." : "Nothing here."}
+            <div className="vc-empty-list">
+              <span className="vc-empty-list-icon">
+                {search || filter !== "all" ? <IconSearch size={22} /> : <IconArchive size={22} />}
+              </span>
+              <span className="vc-empty-list-text">
+                {search || filter !== "all" ? "No chats match." : "Nothing here."}
+              </span>
             </div>
           )}
         </div>
@@ -840,7 +993,7 @@ export default function InboxPage() {
                   an SFU we haven't built. Disabled with a reason rather than
                   hidden, so the limit is visible. */}
               <button
-                className="head-btn"
+                className="head-btn vc-icon-btn"
                 title={
                   selected.type === "DIRECT"
                     ? `Video call ${titleOf(selected)}`
@@ -855,7 +1008,7 @@ export default function InboxPage() {
                 <IconVideo />
               </button>
               <button
-                className="head-btn"
+                className="head-btn vc-icon-btn"
                 title={
                   selected.type === "DIRECT"
                     ? `Voice call ${titleOf(selected)}`
@@ -870,14 +1023,14 @@ export default function InboxPage() {
                 <IconPhone />
               </button>
               <button
-                className="head-btn"
+                className="head-btn vc-icon-btn"
                 title={selected.muted ? "Unmute" : "Mute"}
                 onClick={() => setConvState(selected.id, { muted: !selected.muted })}
               >
                 <IconMuted />
               </button>
               <button
-                className="head-btn"
+                className="head-btn vc-icon-btn"
                 title={selected.archived ? "Unarchive" : "Archive"}
                 onClick={() => setConvState(selected.id, { archived: !selected.archived })}
               >
@@ -1032,7 +1185,7 @@ export default function InboxPage() {
                 </div>
               </div>
               <button
-                className="head-btn"
+                className="head-btn vc-icon-btn"
                 onClick={() => {
                   setReplyTo(null);
                   setEditing(null);
@@ -1155,13 +1308,15 @@ export default function InboxPage() {
           </form>
         </div>
       ) : (
-        <div className="thread-empty">
+        <div className="thread-empty vc-empty-panel">
+          <span className="vc-empty-icon">
+            <IconNewChat size={30} />
+          </span>
           <h2>Vorion Systems</h2>
           <p>
             Send and receive messages with your assigned clients. Their phone numbers stay with the
             company — you never see them, and they never see yours.
           </p>
-          <div className="rule" />
         </div>
       )}
 

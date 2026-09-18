@@ -638,13 +638,21 @@ export class SupabaseService implements OnModuleInit {
       .select("settings")
       .eq("id", companyId)
       .limit(1);
-    if (error) throw new InternalServerErrorException(error.message);
+    // Older Supabase installations may not have the optional settings column
+    // yet. Keep policy reads usable while the migration is being applied.
+    if (error) {
+      if (error.code === "42703") return {};
+      throw new InternalServerErrorException(error.message);
+    }
     const settings = (data?.[0] as { settings?: unknown } | undefined)?.settings;
     return settings && typeof settings === "object" ? (settings as Record<string, unknown>) : {};
   }
 
   async updateCompanySettings(companyId: string, settings: Record<string, unknown>): Promise<void> {
     const { error } = await this.client!.from("companies").update({ settings }).eq("id", companyId);
+    if (error?.code === "42703") {
+      throw new InternalServerErrorException("Company settings are unavailable until the Supabase schema migration is applied.");
+    }
     if (error) throw new InternalServerErrorException(error.message);
   }
 

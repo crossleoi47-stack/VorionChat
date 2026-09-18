@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { AuthenticatedUser } from "../auth/jwt-payload.interface";
@@ -42,6 +42,11 @@ export class StatusService {
   ) {}
 
   async create(dto: CreateStatusDto, user: AuthenticatedUser): Promise<StatusItemDto> {
+    if (!this.prisma.isConfigured) {
+      throw new ServiceUnavailableException(
+        "Status posting is unavailable until DATABASE_URL is configured with a PostgreSQL connection.",
+      );
+    }
     const type = dto.type ?? "TEXT";
     if (type === "TEXT" && !dto.body?.trim()) {
       throw new BadRequestException("A text status needs some text");
@@ -80,6 +85,9 @@ export class StatusService {
    * pinned to the top — the shape WhatsApp's Status tab uses.
    */
   async feed(user: AuthenticatedUser): Promise<StatusFeedEntryDto[]> {
+    // Status storage still uses Prisma. A Supabase-only deployment has no
+    // Prisma connection, so an empty feed should not produce a 500 response.
+    if (!this.prisma.isConfigured) return [];
     const now = new Date();
     const rows = await this.prisma.status.findMany({
       where: {

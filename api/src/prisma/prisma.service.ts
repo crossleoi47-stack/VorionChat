@@ -31,6 +31,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     this.canConnect = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL ?? "");
   }
 
+  /** Whether a PostgreSQL connection is configured for legacy Prisma queries. */
+  get isConfigured(): boolean {
+    return this.canConnect;
+  }
+
   async onModuleInit() {
     if (!this.canConnect) {
       this.logger.warn("Prisma startup skipped because DATABASE_URL is not a PostgreSQL connection string.");

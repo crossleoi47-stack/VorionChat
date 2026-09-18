@@ -5,6 +5,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../auth/jwt-payload.interface";
 import { SupabaseService } from "../supabase/supabase.service";
 import { Feature, FeatureMap, resolveFeatures } from "./features";
+import { mapSupabaseRoleToApp } from "../users/user-compat";
 import { DEFAULT_DLP, DlpConfig, DlpHit, describeHits, scanText } from "./dlp";
 
 interface CompanySettings {
@@ -25,6 +26,11 @@ export class PolicyService {
   }
 
   async featuresFor(userId: string): Promise<FeatureMap> {
+    if (!this.prisma.isConfigured) {
+      const user = await this.supabase.getUserById(userId);
+      if (!user) return resolveFeatures("EMPLOYEE", undefined, undefined);
+      return resolveFeatures(mapSupabaseRoleToApp(user.role) as Role, undefined, undefined);
+    }
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       select: { role: true, companyId: true, featureOverrides: true },

@@ -62,6 +62,9 @@ export class OversightService {
 
   async conversations(user: AuthenticatedUser): Promise<OversightConversationDto[]> {
     this.assertOversight(user);
+    // The active deployment uses Supabase REST and may not have DATABASE_URL
+    // configured for the legacy Prisma oversight queries yet.
+    if (!this.prisma.isConfigured) return [];
 
     const rows = await this.prisma.conversation.findMany({
       where: { companyId: user.companyId },
@@ -104,6 +107,7 @@ export class OversightService {
     user: AuthenticatedUser,
   ): Promise<OversightMessageDto[]> {
     this.assertOversight(user);
+    if (!this.prisma.isConfigured) return [];
 
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, companyId: user.companyId },
@@ -149,6 +153,7 @@ export class OversightService {
    */
   async anomalies(user: AuthenticatedUser, days = 7): Promise<AnomalyDto[]> {
     this.assertOversight(user);
+    if (!this.prisma.isConfigured) return [];
 
     const since = new Date(Date.now() - days * 86400_000);
     const logs = await this.prisma.auditLog.findMany({

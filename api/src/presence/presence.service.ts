@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import Redis from "ioredis";
 import { PrismaService } from "../prisma/prisma.service";
+import { SupabaseService } from "../supabase/supabase.service";
 
 const KEY = (userId: string) => `presence:${userId}`;
 const TTL_SECONDS = 70; // refreshed by heartbeat every 30s; survives a brief blip
@@ -32,6 +33,7 @@ export class PresenceService implements OnModuleDestroy {
   constructor(
     config: ConfigService,
     private prisma: PrismaService,
+    private supabase: SupabaseService,
   ) {
     const url = config.get<string>("REDIS_URL");
     if (url) {
@@ -91,6 +93,15 @@ export class PresenceService implements OnModuleDestroy {
       userIds.forEach((id) => {
         const exp = this.memory.get(id);
         if (exp && exp > now) online.add(id);
+      });
+    }
+
+    if (!this.prisma.isConfigured) {
+      const users = await Promise.all(userIds.map((id) => this.supabase.getUserById(id)));
+      return users.flatMap((u) => {
+        if (!u) return [];
+        const visible = u.status === "ACTIVE";
+        return [{ userId: u.id, online: visible && online.has(u.id), lastSeenAt: null }];
       });
     }
 
