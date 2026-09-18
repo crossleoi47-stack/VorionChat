@@ -27,10 +27,11 @@ to this project and its production environment. Apply the exact DNS values
 shown by Vercel, rather than guessing a CNAME target. Redeploy after changing
 build settings, and confirm the deployment is promoted to production.
 
-Set `NEXT_PUBLIC_API_BASE` to the deployed HTTPS backend URL including `/api`
-before building. The local fallback `http://localhost:3010/api` cannot reach
-your backend from visitors' browsers. This affects API requests after page
-load, not Vercel's platform-level `NOT_FOUND` response.
+When the backend is exposed through the same production domain, omit
+`NEXT_PUBLIC_API_BASE`; the client uses `/api`. If the backend is deployed on
+a separate public origin, set `NEXT_PUBLIC_API_BASE` to that HTTPS URL
+including `/api` and no trailing slash before building. The local fallback
+`http://localhost:3010/api` is used only during development.
 
 There is no checked-in Vercel project link or domain mapping. This document
 records the required configuration; it does not prove the live project or

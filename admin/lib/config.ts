@@ -1,12 +1,7 @@
 const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE?.trim();
-
-if (process.env.NODE_ENV === "production" && !configuredApiBase) {
-  throw new Error(
-    "NEXT_PUBLIC_API_BASE is required in production and must be the public backend URL ending in /api.",
-  );
-}
-
-const rawApiBase = configuredApiBase || "http://localhost:3010/api";
+const rawApiBase =
+  configuredApiBase ||
+  (process.env.NODE_ENV === "production" ? "/api" : "http://localhost:3010/api");
 
 // Keep the configured origin/path canonical, regardless of a user's trailing
 // slash or whether they supplied the /api path separately.
