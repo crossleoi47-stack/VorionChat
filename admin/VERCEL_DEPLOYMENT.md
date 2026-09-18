@@ -1,15 +1,15 @@
 # Vercel frontend deployment
 
-The repository root is an npm workspace that builds the Next.js application
-from `admin/`. Configure the Vercel project as follows:
+The recommended Vercel project points directly at the Next.js application in
+`admin/`. Configure the Vercel project as follows:
 
 | Setting | Value |
 | --- | --- |
-| Root Directory | repository root (`.`) |
+| Root Directory | `admin` |
 | Framework Preset | Next.js |
 | Install Command | Default (`npm install` or lockfile-based install) |
-| Build Command | `npm run build` (also set in root `vercel.json`) |
-| Output Directory | `admin/.next` (also set in root `vercel.json`) |
+| Build Command | `npm run build` |
+| Output Directory | Framework default (or `.next`, never `admin/.next`) |
 
 Do not deploy `public/` or serve `.next/` as a generic static directory.
 Use Vercel's Next.js framework integration.
