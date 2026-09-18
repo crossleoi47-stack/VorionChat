@@ -1,9 +1,5 @@
 import { io, Socket } from "socket.io-client";
-
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3010/api")
-  .trim()
-  .replace(/\/+$/, "");
-const SOCKET_BASE = API_BASE.replace(/\/api\/?$/, "");
+import { SOCKET_BASE } from "@/lib/config";
 
 let socket: Socket | null = null;
 

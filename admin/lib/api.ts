@@ -1,15 +1,5 @@
-/**
- * NEXT_PUBLIC_API_BASE is inlined at build time. Normalize it once so an
- * accidentally configured trailing slash cannot produce URLs such as
- * `//auth/me` (which browsers treat as a different path/host).
- */
-export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3010/api")
-  .trim()
-  .replace(/\/+$/, "");
-
-export function apiUrl(path: string): string {
-  return `${API_BASE}/${path.replace(/^\/+/, "")}`;
-}
+import { API_BASE, apiUrl } from "@/lib/config";
+export { API_BASE, apiUrl } from "@/lib/config";
 
 export class ApiError extends Error {
   constructor(
