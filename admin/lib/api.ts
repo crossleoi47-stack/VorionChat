@@ -1,4 +1,15 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3010/api";
+/**
+ * NEXT_PUBLIC_API_BASE is inlined at build time. Normalize it once so an
+ * accidentally configured trailing slash cannot produce URLs such as
+ * `//auth/me` (which browsers treat as a different path/host).
+ */
+export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3010/api")
+  .trim()
+  .replace(/\/+$/, "");
+
+export function apiUrl(path: string): string {
+  return `${API_BASE}/${path.replace(/^\/+/, "")}`;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -28,7 +39,7 @@ async function refreshAccessToken(): Promise<boolean> {
   const refreshToken = window.localStorage.getItem("custodian.refreshToken");
   if (!refreshToken) return false;
 
-  const res = await fetch(`${API_BASE}/auth/refresh`, {
+  const res = await fetch(apiUrl("/auth/refresh"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken }),
@@ -50,7 +61,7 @@ export async function api<T = unknown>(
   options: { method?: string; body?: unknown; retry?: boolean } = {},
 ): Promise<T> {
   const token = getAccessToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: options.method ?? "GET",
     headers: {
       "Content-Type": "application/json",
@@ -82,7 +93,7 @@ export async function apiUpload<T = unknown>(path: string, file: File, retry = t
   const form = new FormData();
   form.append("file", file);
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
@@ -122,7 +133,7 @@ export async function attachmentUrl(attachmentId: string): Promise<string> {
   if (hit && hit.expiresAt > Date.now()) return hit.url;
 
   const { url } = await api<{ url: string }>(`/attachments/${attachmentId}/link`);
-  const absolute = url.startsWith("http") ? url : `${API_BASE.replace(/\/api$/, "")}${url}`;
+  const absolute = url.startsWith("http") ? url : `${API_BASE.replace(/\/api$/, "")}/${url.replace(/^\/+/, "")}`;
   // Re-sign a minute before the server's 5-minute expiry.
   linkCache.set(attachmentId, { url: absolute, expiresAt: Date.now() + 4 * 60_000 });
   return absolute;
@@ -131,5 +142,5 @@ export async function attachmentUrl(attachmentId: string): Promise<string> {
 /** Status media still uses the session token — see the note in the README. */
 export function statusMediaUrl(statusId: string): string {
   const token = getAccessToken();
-  return `${API_BASE}/status/${statusId}/media?token=${encodeURIComponent(token ?? "")}`;
+  return `${apiUrl(`/status/${statusId}/media`)}?token=${encodeURIComponent(token ?? "")}`;
 }
